@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import Anthropic from '@anthropic-ai/sdk';
 import './index.css';
 import { App } from './ui/App';
+import { PassphraseGate } from './ui/components/PassphraseGate';
 import { ClaudeLLMAdapter } from './adapters/llm/ClaudeLLMAdapter';
 import { StructuredLogger } from './adapters/logger/StructuredLogger';
 import { LocalStorageAdapter } from './adapters/storage/LocalStorageAdapter';
@@ -11,6 +12,7 @@ import { newRequestID } from './adapters/util/requestID';
 const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY as string | undefined;
 const model = (import.meta.env.VITE_ANTHROPIC_MODEL as string | undefined) ?? 'claude-sonnet-4-6';
 const baseURL = import.meta.env.VITE_ANTHROPIC_BASE_URL as string | undefined;
+const passphrase = import.meta.env.VITE_INVITE_PASSPHRASE as string | undefined;
 
 if (!apiKey) {
   const root = document.getElementById('root');
@@ -32,7 +34,9 @@ if (!apiKey) {
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <App deps={{ llm, logger, storage, newRequestID }} />
+      <PassphraseGate expected={passphrase}>
+        <App deps={{ llm, logger, storage, newRequestID }} />
+      </PassphraseGate>
     </StrictMode>
   );
 }
