@@ -1,0 +1,74 @@
+import { describe, it, expect } from 'vitest';
+import { render, screen, within } from '@testing-library/react';
+import { INITIAL_GAME_STATE } from '../../domain/entities/GameState';
+import { StatusBar } from './StatusBar';
+
+describe('StatusBar', () => {
+  it('renders the day counter', () => {
+    render(<StatusBar state={INITIAL_GAME_STATE} />);
+    const dayLine = screen.getByText(/DAY/);
+    expect(dayLine).toHaveTextContent('DAY 1');
+    expect(dayLine).toHaveTextContent('/ 100');
+  });
+
+  it('renders all five resource rows', () => {
+    render(<StatusBar state={INITIAL_GAME_STATE} />);
+    for (const key of ['hp', 'sanity', 'food', 'water', 'ammo']) {
+      expect(screen.getByTestId(`resource-${key}`)).toBeInTheDocument();
+    }
+  });
+
+  it('renders resource values', () => {
+    render(<StatusBar state={INITIAL_GAME_STATE} />);
+    const hpRow = screen.getByTestId('resource-hp');
+    expect(within(hpRow).getByText(/100 \/ 100/)).toBeInTheDocument();
+  });
+
+  it('renders empty-inventory hint when inventory is empty', () => {
+    render(<StatusBar state={{ ...INITIAL_GAME_STATE, inventory: [] }} />);
+    expect(screen.getByText('（空）')).toBeInTheDocument();
+  });
+
+  it('renders inventory items when present', () => {
+    render(
+      <StatusBar
+        state={{ ...INITIAL_GAME_STATE, inventory: ['手电筒', '医药包', '手电筒'] }}
+      />
+    );
+    const list = screen.getByTestId('inventory-list');
+    const items = within(list).getAllByRole('listitem');
+    expect(items).toHaveLength(3);
+    expect(items[0]).toHaveTextContent('手电筒');
+    expect(items[1]).toHaveTextContent('医药包');
+  });
+
+  it.each([
+    [10, 'bg-red-500'],
+    [40, 'bg-amber-500'],
+    [80, 'bg-emerald-500'],
+  ])('uses appropriate color for hp=%i', (hp, expectedClass) => {
+    const { container } = render(
+      <StatusBar
+        state={{ ...INITIAL_GAME_STATE, resources: { ...INITIAL_GAME_STATE.resources, hp } }}
+      />
+    );
+    const hpRow = screen.getByTestId('resource-hp');
+    const bar = hpRow.querySelector(`.${expectedClass}`);
+    expect(bar).toBeInTheDocument();
+    expect(container).toBeTruthy();
+  });
+
+  it.each([
+    [10, 'bg-red-500'],
+    [40, 'bg-amber-500'],
+    [80, 'bg-sky-500'],
+  ])('uses appropriate color for food=%i (non-vital resource)', (food, expectedClass) => {
+    render(
+      <StatusBar
+        state={{ ...INITIAL_GAME_STATE, resources: { ...INITIAL_GAME_STATE.resources, food } }}
+      />
+    );
+    const row = screen.getByTestId('resource-food');
+    expect(row.querySelector(`.${expectedClass}`)).toBeInTheDocument();
+  });
+});
