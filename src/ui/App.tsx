@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { ChoiceList } from './components/ChoiceList';
 import { FreeInputBox } from './components/FreeInputBox';
 import { GameOverPane } from './components/GameOverPane';
+import { LoginScreen } from './components/LoginScreen';
 import { NarrativePane } from './components/NarrativePane';
 import { SlotSelectScreen } from './components/SlotSelectScreen';
 import { StatusBar } from './components/StatusBar';
@@ -37,13 +38,31 @@ export function App({ deps, disableIntroAnimation = false }: AppProps) {
     engine.error,
   ]);
 
+  if (engine.session === null) {
+    return <LoginScreen onLogin={engine.login} animate={!disableIntroAnimation} />;
+  }
+
   if (!engine.hasStarted) {
     return (
       <SlotSelectScreen
         slots={engine.slots}
-        onSelect={engine.selectSlot}
-        onDelete={engine.deleteSlot}
+        onSelect={(id) => void engine.selectSlot(id)}
+        onDelete={(id) => void engine.deleteSlot(id)}
         animate={!disableIntroAnimation}
+        extraHeader={
+          <div className="text-neutral-500 text-xs tracking-widest text-center mt-2">
+            <span className="text-amber-500">{engine.session.username}</span>{' '}
+            ·{' '}
+            <button
+              type="button"
+              data-testid="logout-button"
+              onClick={engine.logout}
+              className="hover:text-red-400 transition-colors"
+            >
+              退出登录
+            </button>
+          </div>
+        }
       />
     );
   }
@@ -58,7 +77,7 @@ export function App({ deps, disableIntroAnimation = false }: AppProps) {
           <button
             type="button"
             data-testid="exit-to-menu"
-            onClick={engine.exitToSlotMenu}
+            onClick={() => void engine.exitToSlotMenu()}
             className="text-neutral-500 hover:text-amber-400 text-xs tracking-wider px-2 py-1 transition-colors"
           >
             ← 回到存档列表
@@ -83,7 +102,7 @@ export function App({ deps, disableIntroAnimation = false }: AppProps) {
           <GameOverPane
             day={engine.state.day}
             reason={engine.state.gameOverReason}
-            onRestart={engine.restart}
+            onRestart={() => void engine.restart()}
           />
         ) : (
           <>

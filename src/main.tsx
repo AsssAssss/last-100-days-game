@@ -1,42 +1,47 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import Anthropic from '@anthropic-ai/sdk';
 import './index.css';
 import { App } from './ui/App';
-import { PassphraseGate } from './ui/components/PassphraseGate';
-import { ClaudeLLMAdapter } from './adapters/llm/ClaudeLLMAdapter';
+import { AuthClient } from './adapters/auth/AuthClient';
+import { HTTPLLMAdapter } from './adapters/llm/HTTPLLMAdapter';
 import { StructuredLogger } from './adapters/logger/StructuredLogger';
-import { LocalStorageAdapter } from './adapters/storage/LocalStorageAdapter';
+import { HTTPStorageAdapter } from './adapters/storage/HTTPStorageAdapter';
 import { newRequestID } from './adapters/util/requestID';
+import { createBrowserSessionStore } from './ui/sessionStore';
 
-const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY as string | undefined;
-const model = (import.meta.env.VITE_ANTHROPIC_MODEL as string | undefined) ?? 'claude-sonnet-4-6';
-const baseURL = import.meta.env.VITE_ANTHROPIC_BASE_URL as string | undefined;
-const passphrase = import.meta.env.VITE_INVITE_PASSPHRASE as string | undefined;
+const backendURL = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.replace(/\/$/, '');
 
-if (!apiKey) {
+if (!backendURL) {
   const root = document.getElementById('root');
   if (root) {
     root.innerHTML =
-      '<div style="padding:32px;color:#f59e0b;font-family:monospace">' +
-      '请在项目根目录创建 <code>.env.local</code>，参考 <code>.env.example</code> 填入 VITE_ANTHROPIC_API_KEY' +
+      '<div style="padding:32px;color:#f59e0b;font-family:monospace;line-height:1.6">' +
+      '请在项目根目录创建 <code>.env.local</code>，填入 <code>VITE_BACKEND_URL</code>。<br/>' +
+      '本地开发：<code>http://127.0.0.1:8787</code>（wrangler dev）<br/>' +
+      '生产：<code>https://your-worker.workers.dev</code>' +
       '</div>';
   }
 } else {
   const logger = new StructuredLogger();
-  const anthropic = new Anthropic({
-    apiKey,
-    dangerouslyAllowBrowser: true,
-    ...(baseURL ? { baseURL } : {}),
-  });
-  const llm = new ClaudeLLMAdapter(anthropic, { model }, logger);
-  const storage = new LocalStorageAdapter(window.localStorage);
+  const sessionStore = createBrowserSessionStore(window.localStorage);
+  const getToken = () => sessionStore.get()?.token ?? null;
+
+  const auth = new AuthClient({ baseURL: backendURL });
+  const storage = new HTTPStorageAdapter({ baseURL: backendURL, getToken });
+  const llm = new HTTPLLMAdapter({ baseURL: backendURL, getToken }, logger);
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <PassphraseGate expected={passphrase}>
-        <App deps={{ llm, logger, storage, newRequestID }} />
-      </PassphraseGate>
+      <App
+        deps={{
+          llm,
+          logger,
+          storage,
+          auth,
+          sessionStore,
+          newRequestID,
+        }}
+      />
     </StrictMode>
   );
 }

@@ -3,21 +3,27 @@ import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import type { ILLMPort } from '../application/ports/ILLMPort';
 import type { ILogger } from '../application/ports/ILogger';
 import { LocalStorageAdapter, type StorageLike } from '../adapters/storage/LocalStorageAdapter';
+import type { AuthClient, LoginResult } from '../adapters/auth/AuthClient';
 import { INITIAL_GAME_STATE } from '../domain/entities/GameState';
 import { App } from './App';
+import { createBrowserSessionStore } from './sessionStore';
 
 function makeLogger(): ILogger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
-function makeStorage(): { adapter: LocalStorageAdapter; mem: StorageLike } {
+function makeMem(): StorageLike & { store: Map<string, string> } {
   const store = new Map<string, string>();
-  const mem: StorageLike = {
+  return {
+    store,
     getItem: (k) => store.get(k) ?? null,
     setItem: (k, v) => void store.set(k, v),
     removeItem: (k) => void store.delete(k),
   };
-  return { adapter: new LocalStorageAdapter(mem, () => 1_700_000_000_000), mem };
+}
+
+function makeAuth(result: LoginResult = { ok: true, userId: 'u', token: 't', created: true }): AuthClient {
+  return { login: vi.fn(async () => result) } as unknown as AuthClient;
 }
 
 function makeLLM(over: Partial<ILLMPort> = {}): ILLMPort {
@@ -39,12 +45,27 @@ function makeLLM(over: Partial<ILLMPort> = {}): ILLMPort {
   };
 }
 
-function makeDeps(over: { llm?: ILLMPort; storage?: LocalStorageAdapter } = {}) {
+function makeDeps(
+  over: {
+    llm?: ILLMPort;
+    storage?: LocalStorageAdapter;
+    auth?: AuthClient;
+    preloggedIn?: boolean;
+  } = {}
+) {
+  const sessionMem = makeMem();
+  const sessionStore = createBrowserSessionStore(sessionMem);
+  if (over.preloggedIn) {
+    sessionStore.set({ userId: 'u', token: 't', username: 'xiaoxue' });
+  }
   return {
     llm: over.llm ?? makeLLM(),
     logger: makeLogger(),
-    storage: over.storage ?? makeStorage().adapter,
+    storage: over.storage ?? new LocalStorageAdapter(makeMem(), () => 1_700_000_000_000),
+    auth: over.auth ?? makeAuth(),
+    sessionStore,
     newRequestID: () => 'rid',
+    _sessionMem: sessionMem,
   };
 }
 
@@ -52,166 +73,180 @@ function renderApp(deps: ReturnType<typeof makeDeps>) {
   return render(<App deps={deps} disableIntroAnimation={true} />);
 }
 
-describe('App', () => {
-  describe('slot select screen', () => {
-    it('shows the slot select screen on mount with 5 empty slots', () => {
-      renderApp(makeDeps());
-      expect(screen.getByTestId('slot-select-screen')).toBeInTheDocument();
-      for (let id = 1; id <= 5; id++) {
-        expect(screen.getByTestId(`slot-${id}`)).toBeInTheDocument();
-      }
-    });
+async function loginThrough(deps: ReturnType<typeof makeDeps>) {
+  renderApp(deps);
+  fireEvent.change(screen.getByTestId('login-username'), { target: { value: 'xiaoxue' } });
+  fireEvent.change(screen.getByTestId('login-pin'), { target: { value: '1234' } });
+  fireEvent.submit(screen.getByTestId('login-form'));
+  await waitFor(() => screen.getByTestId('slot-select-screen'));
+}
 
-    it('shows day and continue/delete for occupied slots', () => {
-      const { adapter } = makeStorage();
-      adapter.saveSlot(2, { ...INITIAL_GAME_STATE, day: 5, lastNarrative: '昨夜风雪。' });
-      renderApp(makeDeps({ storage: adapter }));
-      expect(screen.getByTestId('slot-2-continue')).toHaveTextContent('DAY 5');
-      expect(screen.getByTestId('slot-2-delete')).toBeInTheDocument();
-    });
-
-    it('clicking empty slot enters game and auto-fetches first turn', async () => {
-      const deps = makeDeps();
-      renderApp(deps);
-      fireEvent.click(screen.getByTestId('slot-1'));
-      await waitFor(() =>
-        expect(screen.getByTestId('narrative-text').textContent).toContain(
-          '你在地下车库点燃了打火机。'
-        )
-      );
-      expect(deps.llm.nextTurn).toHaveBeenCalledOnce();
-    });
-
-    it('clicking continue on occupied slot resumes without fetching', () => {
-      const { adapter } = makeStorage();
-      adapter.saveSlot(3, {
-        ...INITIAL_GAME_STATE,
-        day: 5,
-        lastNarrative: '你蜷在角落。',
-        choices: ['逃', '躲', '战'],
-      });
-      const deps = makeDeps({ storage: adapter });
-      renderApp(deps);
-      fireEvent.click(screen.getByTestId('slot-3-continue'));
-      expect(screen.getByText('DAY 5')).toBeInTheDocument();
-      expect(deps.llm.nextTurn).not.toHaveBeenCalled();
-    });
-
-    it('clicking delete wipes that slot and keeps user on slot screen', () => {
-      const { adapter } = makeStorage();
-      adapter.saveSlot(4, { ...INITIAL_GAME_STATE, day: 7, lastNarrative: 'x' });
-      const deps = makeDeps({ storage: adapter });
-      renderApp(deps);
-      expect(screen.getByTestId('slot-4-delete')).toBeInTheDocument();
-      fireEvent.click(screen.getByTestId('slot-4-delete'));
-      const slot4 = screen.getByTestId('slot-4');
-      expect(slot4.getAttribute('data-empty')).toBe('true');
-      expect(deps.llm.nextTurn).not.toHaveBeenCalled();
-    });
+describe('App — login flow', () => {
+  it('shows login screen on mount when not logged in', () => {
+    renderApp(makeDeps());
+    expect(screen.getByTestId('login-screen')).toBeInTheDocument();
   });
 
-  describe('in-game', () => {
-    function enterGame(deps: ReturnType<typeof makeDeps>) {
-      const utils = renderApp(deps);
-      fireEvent.click(screen.getByTestId('slot-1'));
-      return utils;
-    }
+  it('logging in transitions to slot select screen', async () => {
+    await loginThrough(makeDeps());
+    expect(screen.getByTestId('slot-select-screen')).toBeInTheDocument();
+  });
 
-    it('shows status bar with day counter once entered', () => {
-      enterGame(makeDeps());
-      expect(screen.getByText('DAY 1')).toBeInTheDocument();
-      expect(screen.getByTestId('resource-hp')).toBeInTheDocument();
-    });
+  it('shows username and logout button on slot screen', async () => {
+    await loginThrough(makeDeps());
+    expect(screen.getByText('xiaoxue')).toBeInTheDocument();
+    expect(screen.getByTestId('logout-button')).toBeInTheDocument();
+  });
 
-    it('renders choices after the first turn', async () => {
-      enterGame(makeDeps());
-      await waitFor(() => {
-        expect(screen.getByTestId('choice-0')).toHaveTextContent('走出去');
-      });
-    });
+  it('clicking logout returns to login screen', async () => {
+    await loginThrough(makeDeps());
+    fireEvent.click(screen.getByTestId('logout-button'));
+    expect(screen.getByTestId('login-screen')).toBeInTheDocument();
+  });
 
-    it('advances state when a choice is clicked', async () => {
-      const deps = makeDeps();
-      enterGame(deps);
-      await waitFor(() => screen.getByTestId('choice-0'));
-      fireEvent.click(screen.getByTestId('choice-0'));
-      await waitFor(() => expect(deps.llm.nextTurn).toHaveBeenCalledTimes(2));
-    });
+  it('shows slot screen directly when session already exists', () => {
+    renderApp(makeDeps({ preloggedIn: true }));
+    expect(screen.getByTestId('slot-select-screen')).toBeInTheDocument();
+  });
+});
 
-    it('advances state when free input is submitted', async () => {
-      const deps = makeDeps();
-      enterGame(deps);
-      await waitFor(() => screen.getByTestId('free-input'));
-      fireEvent.change(screen.getByTestId('free-input'), {
-        target: { value: '砸碎车窗' },
-      });
-      fireEvent.submit(screen.getByTestId('free-input-form'));
-      await waitFor(() => expect(deps.llm.nextTurn).toHaveBeenCalledTimes(2));
-    });
+describe('App — gameplay (after login)', () => {
+  it('clicking empty slot enters game and auto-fetches first turn', async () => {
+    const deps = makeDeps({ preloggedIn: true });
+    renderApp(deps);
+    await waitFor(() => screen.getByTestId('slot-1'));
+    fireEvent.click(screen.getByTestId('slot-1'));
+    await waitFor(() =>
+      expect(screen.getByTestId('narrative-text').textContent).toContain(
+        '你在地下车库点燃了打火机。'
+      )
+    );
+    expect(deps.llm.nextTurn).toHaveBeenCalledOnce();
+  });
 
-    it('exit-to-menu button returns to slot screen without wiping save', async () => {
-      const deps = makeDeps();
-      enterGame(deps);
-      await waitFor(() => screen.getByTestId('choice-0'));
-      fireEvent.click(screen.getByTestId('exit-to-menu'));
-      expect(screen.getByTestId('slot-select-screen')).toBeInTheDocument();
-      // slot 1 still has the saved (day 1 with narrative) state
-      const slot1 = screen.getByTestId('slot-1');
-      expect(slot1.getAttribute('data-empty')).toBe('false');
+  it('clicking continue on occupied slot resumes without re-fetching', async () => {
+    const deps = makeDeps({ preloggedIn: true });
+    await deps.storage.saveSlot(3, {
+      ...INITIAL_GAME_STATE,
+      day: 5,
+      lastNarrative: '你蜷在角落。',
+      choices: ['逃', '躲', '战'],
     });
+    renderApp(deps);
+    await waitFor(() => screen.getByTestId('slot-3-continue'));
+    fireEvent.click(screen.getByTestId('slot-3-continue'));
+    await waitFor(() => expect(screen.getByText('DAY 5')).toBeInTheDocument());
+    expect(deps.llm.nextTurn).not.toHaveBeenCalled();
+  });
 
-    it('shows game over pane when state.isGameOver becomes true', async () => {
-      const llm = makeLLM({
-        nextTurn: vi.fn(async () => ({
-          narrative: '你倒下了。',
-          choices: [],
-          statePatch: {
-            resources: { hp: -200 },
-            inventoryAdd: [],
-            inventoryRemove: [],
-            memoryNote: '死亡',
-            isGameOver: false,
-            dayPassed: true,
-          },
-        })),
-      });
-      enterGame(makeDeps({ llm }));
-      await waitFor(() => expect(screen.getByTestId('game-over')).toBeInTheDocument());
-    });
+  it('clicking delete wipes that slot', async () => {
+    const deps = makeDeps({ preloggedIn: true });
+    await deps.storage.saveSlot(4, { ...INITIAL_GAME_STATE, day: 7, lastNarrative: 'x' });
+    renderApp(deps);
+    await waitFor(() => screen.getByTestId('slot-4-delete'));
+    fireEvent.click(screen.getByTestId('slot-4-delete'));
+    await waitFor(() =>
+      expect(screen.getByTestId('slot-4').getAttribute('data-empty')).toBe('true')
+    );
+  });
 
-    it('shows error banner when LLM call fails', async () => {
-      const llm = makeLLM({
-        nextTurn: vi.fn(async () => {
-          throw new Error('API 限流');
-        }),
-      });
-      enterGame(makeDeps({ llm }));
-      await waitFor(() =>
-        expect(screen.getByTestId('engine-error')).toHaveTextContent('API 限流')
-      );
-    });
+  it('advances state when a choice is clicked', async () => {
+    const deps = makeDeps({ preloggedIn: true });
+    renderApp(deps);
+    await waitFor(() => screen.getByTestId('slot-1'));
+    fireEvent.click(screen.getByTestId('slot-1'));
+    await waitFor(() => screen.getByTestId('choice-0'));
+    fireEvent.click(screen.getByTestId('choice-0'));
+    await waitFor(() => expect(deps.llm.nextTurn).toHaveBeenCalledTimes(2));
+  });
 
-    it('restart after game over clears the slot and returns to slot screen', async () => {
-      const llm = makeLLM({
-        nextTurn: vi.fn(async () => ({
-          narrative: '你倒下了。',
-          choices: [],
-          statePatch: {
-            resources: { hp: -200 },
-            inventoryAdd: [],
-            inventoryRemove: [],
-            memoryNote: '',
-            isGameOver: false,
-            dayPassed: true,
-          },
-        })),
-      });
-      const deps = makeDeps({ llm });
-      enterGame(deps);
-      await waitFor(() => screen.getByTestId('game-over'));
-      act(() => fireEvent.click(screen.getByTestId('restart-button')));
-      expect(screen.getByTestId('slot-select-screen')).toBeInTheDocument();
-      expect(screen.getByTestId('slot-1').getAttribute('data-empty')).toBe('true');
+  it('advances state on free input submission', async () => {
+    const deps = makeDeps({ preloggedIn: true });
+    renderApp(deps);
+    await waitFor(() => screen.getByTestId('slot-1'));
+    fireEvent.click(screen.getByTestId('slot-1'));
+    // 等第一回合 LLM 跑完，否则 FreeInputBox 还是 disabled 状态，submit 会被吞
+    await waitFor(() => screen.getByTestId('choice-0'));
+    fireEvent.change(screen.getByTestId('free-input'), { target: { value: '砸碎车窗' } });
+    fireEvent.submit(screen.getByTestId('free-input-form'));
+    await waitFor(() => expect(deps.llm.nextTurn).toHaveBeenCalledTimes(2));
+  });
+
+  it('exit-to-menu returns to slot screen without wiping save', async () => {
+    const deps = makeDeps({ preloggedIn: true });
+    renderApp(deps);
+    await waitFor(() => screen.getByTestId('slot-1'));
+    fireEvent.click(screen.getByTestId('slot-1'));
+    await waitFor(() => screen.getByTestId('choice-0'));
+    fireEvent.click(screen.getByTestId('exit-to-menu'));
+    await waitFor(() => expect(screen.getByTestId('slot-select-screen')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId('slot-1').getAttribute('data-empty')).toBe('false')
+    );
+  });
+
+  it('shows game over pane when state.isGameOver becomes true', async () => {
+    const llm = makeLLM({
+      nextTurn: vi.fn(async () => ({
+        narrative: '你倒下了。',
+        choices: [],
+        statePatch: {
+          resources: { hp: -200 },
+          inventoryAdd: [],
+          inventoryRemove: [],
+          memoryNote: '死亡',
+          isGameOver: false,
+          dayPassed: true,
+        },
+      })),
     });
+    const deps = makeDeps({ preloggedIn: true, llm });
+    renderApp(deps);
+    await waitFor(() => screen.getByTestId('slot-1'));
+    fireEvent.click(screen.getByTestId('slot-1'));
+    await waitFor(() => expect(screen.getByTestId('game-over')).toBeInTheDocument());
+  });
+
+  it('shows error banner when LLM call fails', async () => {
+    const llm = makeLLM({
+      nextTurn: vi.fn(async () => {
+        throw new Error('API 限流');
+      }),
+    });
+    renderApp(makeDeps({ preloggedIn: true, llm }));
+    await waitFor(() => screen.getByTestId('slot-1'));
+    fireEvent.click(screen.getByTestId('slot-1'));
+    await waitFor(() =>
+      expect(screen.getByTestId('engine-error')).toHaveTextContent('API 限流')
+    );
+  });
+
+  it('restart after game over clears slot and returns to slot screen', async () => {
+    const llm = makeLLM({
+      nextTurn: vi.fn(async () => ({
+        narrative: '你倒下了。',
+        choices: [],
+        statePatch: {
+          resources: { hp: -200 },
+          inventoryAdd: [],
+          inventoryRemove: [],
+          memoryNote: '',
+          isGameOver: false,
+          dayPassed: true,
+        },
+      })),
+    });
+    const deps = makeDeps({ preloggedIn: true, llm });
+    renderApp(deps);
+    await waitFor(() => screen.getByTestId('slot-1'));
+    fireEvent.click(screen.getByTestId('slot-1'));
+    await waitFor(() => screen.getByTestId('game-over'));
+    act(() => fireEvent.click(screen.getByTestId('restart-button')));
+    await waitFor(() =>
+      expect(screen.getByTestId('slot-select-screen')).toBeInTheDocument()
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('slot-1').getAttribute('data-empty')).toBe('true')
+    );
   });
 });

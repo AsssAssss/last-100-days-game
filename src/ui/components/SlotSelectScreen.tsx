@@ -9,6 +9,8 @@ interface SlotSelectScreenProps {
   animate?: boolean;
   /** 用于格式化"X 分钟前"等相对时间；测试中注入固定值。 */
   now?: () => number;
+  /** 标题下方额外内容（如登录信息 + 退出按钮）。 */
+  extraHeader?: React.ReactNode;
 }
 
 export function SlotSelectScreen({
@@ -17,6 +19,7 @@ export function SlotSelectScreen({
   onDelete,
   animate = true,
   now = Date.now,
+  extraHeader,
 }: SlotSelectScreenProps) {
   const [revealed, setRevealed] = useState(!animate);
 
@@ -47,6 +50,7 @@ export function SlotSelectScreen({
           末日已经持续了一段时间。城市沦陷，秩序崩坏。<br />
           你是一名普通幸存者。活到 Day 100。
         </p>
+        {extraHeader}
       </div>
 
       <div

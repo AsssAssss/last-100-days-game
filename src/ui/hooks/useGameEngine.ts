@@ -6,72 +6,139 @@ import {
 import type { SlotId, SlotSummary } from '../../domain/entities/SaveSlot';
 import type { ILLMPort } from '../../application/ports/ILLMPort';
 import type { ILogger } from '../../application/ports/ILogger';
+import type { IStoragePort } from '../../application/ports/IStoragePort';
 import { resolveChoice } from '../../application/usecases/ResolveChoice';
-import type { LocalStorageAdapter } from '../../adapters/storage/LocalStorageAdapter';
+import type { AuthClient, LoginResult } from '../../adapters/auth/AuthClient';
+import type { Session, SessionStore } from '../sessionStore';
 
 export interface GameEngineDeps {
   llm: ILLMPort;
   logger: ILogger;
-  storage: LocalStorageAdapter;
+  storage: IStoragePort;
+  auth: AuthClient;
+  sessionStore: SessionStore;
   newRequestID: () => string;
 }
 
 export interface GameEngine {
   state: GameState;
   loading: boolean;
+  slotsLoading: boolean;
   error: string | null;
-  /** 用户是否已经从 slot 屏进入游戏。 */
   hasStarted: boolean;
-  /** 当前选中的存档槽 id，未进入游戏时为 null。 */
   activeSlotId: SlotId | null;
-  /** 全部 5 个 slot 的概要（实时反映存储状态）。 */
   slots: readonly SlotSummary[];
-  /** 发起一回合：从选项里挑、自由输入、或开局（null）。 */
+  session: Session | null;
+
+  login(username: string, pin: string): Promise<LoginResult>;
+  logout(): void;
+
   play(input: string | null): void;
-  /** 选择某个 slot 进入游戏：占用槽用其存档，空槽开新游戏。 */
-  selectSlot(id: SlotId): void;
-  /** 删除某个 slot 的存档（不影响当前 active slot 的 in-memory state）。 */
-  deleteSlot(id: SlotId): void;
-  /** 退出当前游戏，回到 slot 选择屏（存档保留）。 */
-  exitToSlotMenu(): void;
-  /** 清空当前 active slot，并回到 slot 屏。常见于 Game Over 后"从头再来"。 */
-  restart(): void;
+  selectSlot(id: SlotId): Promise<void>;
+  deleteSlot(id: SlotId): Promise<void>;
+  exitToSlotMenu(): Promise<void>;
+  restart(): Promise<void>;
 }
 
-/**
- * 把 Use Case + Storage + LLM 串起来的 React hook。
- * 持有 GameState；每次 play 会异步推进；状态变化自动落盘到 active slot。
- */
 export function useGameEngine(deps: GameEngineDeps): GameEngine {
   const [state, setState] = useState<GameState>(INITIAL_GAME_STATE);
   const [loading, setLoading] = useState(false);
+  const [slotsLoading, setSlotsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasStarted, setHasStarted] = useState(false);
   const [activeSlotId, setActiveSlotId] = useState<SlotId | null>(null);
-  const [slots, setSlots] = useState<SlotSummary[]>(() => deps.storage.listSlots());
+  const [slots, setSlots] = useState<SlotSummary[]>([]);
+  const [session, setSessionState] = useState<Session | null>(() =>
+    deps.sessionStore.get()
+  );
 
   const depsRef = useRef(deps);
   depsRef.current = deps;
 
-  /**
-   * 防止 play 被并发调用——StrictMode 会重复触发 useEffect，
-   * 玩家也可能在 loading 状态外快速重复点击。一旦在飞，后续 play 调用直接丢弃。
-   */
   const playingRef = useRef(false);
+  const saveSeqRef = useRef(0); // 用于丢弃过期的存盘请求
 
-  const refreshSlots = useCallback(() => {
-    setSlots(depsRef.current.storage.listSlots());
+  const refreshSlots = useCallback(async (): Promise<void> => {
+    if (!depsRef.current.sessionStore.get()) {
+      setSlots([]);
+      return;
+    }
+    setSlotsLoading(true);
+    try {
+      const list = await depsRef.current.storage.listSlots();
+      setSlots([...list]);
+    } catch (err) {
+      depsRef.current.logger.error({
+        requestID: depsRef.current.newRequestID(),
+        feature: 'useGameEngine',
+        action: 'refresh_slots_failed',
+        err: serialize(err),
+      });
+      setError(messageOf(err));
+    } finally {
+      setSlotsLoading(false);
+    }
   }, []);
 
-  // 把状态变化落盘到当前 active slot。开场屏 / 未选 slot 时不写。
+  // 首次挂载：如果已有会话，自动拉一次 slot 列表
+  useEffect(() => {
+    if (session) {
+      void refreshSlots();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 状态变更落盘到当前 active slot（异步、可中断）
   useEffect(() => {
     if (activeSlotId === null) return;
     if (state.lastNarrative === '' && state.day === INITIAL_GAME_STATE.day && !state.isGameOver) {
       return;
     }
-    depsRef.current.storage.saveSlot(activeSlotId, state);
-    refreshSlots();
+    const seq = ++saveSeqRef.current;
+    void depsRef.current.storage.saveSlot(activeSlotId, state).then(
+      () => {
+        if (seq !== saveSeqRef.current) return;
+        void refreshSlots();
+      },
+      (err) => {
+        depsRef.current.logger.error({
+          requestID: depsRef.current.newRequestID(),
+          feature: 'useGameEngine',
+          action: 'save_failed',
+          err: serialize(err),
+        });
+        setError(messageOf(err));
+      }
+    );
   }, [state, activeSlotId, refreshSlots]);
+
+  const setSession = useCallback((s: Session | null) => {
+    depsRef.current.sessionStore.set(s);
+    setSessionState(s);
+  }, []);
+
+  const login = useCallback(
+    async (username: string, pin: string): Promise<LoginResult> => {
+      const result = await depsRef.current.auth.login(username, pin);
+      if (result.ok) {
+        setSession({ userId: result.userId, token: result.token, username });
+        await refreshSlots();
+      }
+      return result;
+    },
+    [refreshSlots, setSession]
+  );
+
+  const logout = useCallback(() => {
+    setSession(null);
+    setHasStarted(false);
+    setActiveSlotId(null);
+    setState(INITIAL_GAME_STATE);
+    setError(null);
+    setLoading(false);
+    setSlots([]);
+    playingRef.current = false;
+  }, [setSession]);
 
   const play = useCallback((input: string | null) => {
     if (playingRef.current) return;
@@ -100,56 +167,84 @@ export function useGameEngine(deps: GameEngineDeps): GameEngine {
     });
   }, []);
 
-  const selectSlot = useCallback(
-    (id: SlotId) => {
-      const loaded = depsRef.current.storage.loadSlot(id);
+  const selectSlot = useCallback(async (id: SlotId): Promise<void> => {
+    setError(null);
+    setLoading(false);
+    try {
+      const loaded = await depsRef.current.storage.loadSlot(id);
       setActiveSlotId(id);
       setState(loaded ?? INITIAL_GAME_STATE);
-      setError(null);
-      setLoading(false);
       setHasStarted(true);
-    },
-    []
-  );
+    } catch (err) {
+      depsRef.current.logger.error({
+        requestID: depsRef.current.newRequestID(),
+        feature: 'useGameEngine',
+        action: 'select_slot_failed',
+        err: serialize(err),
+      });
+      setError(messageOf(err));
+    }
+  }, []);
 
-  const deleteSlot = useCallback(
-    (id: SlotId) => {
-      depsRef.current.storage.clearSlot(id);
-      refreshSlots();
-    },
-    [refreshSlots]
-  );
-
-  const exitToSlotMenu = useCallback(() => {
-    setHasStarted(false);
-    setActiveSlotId(null);
-    setState(INITIAL_GAME_STATE);
-    setError(null);
-    setLoading(false);
-    playingRef.current = false;
-    refreshSlots();
+  const deleteSlot = useCallback(async (id: SlotId): Promise<void> => {
+    try {
+      await depsRef.current.storage.clearSlot(id);
+      await refreshSlots();
+    } catch (err) {
+      depsRef.current.logger.error({
+        requestID: depsRef.current.newRequestID(),
+        feature: 'useGameEngine',
+        action: 'delete_slot_failed',
+        err: serialize(err),
+      });
+      setError(messageOf(err));
+    }
   }, [refreshSlots]);
 
-  const restart = useCallback(() => {
-    if (activeSlotId !== null) {
-      depsRef.current.storage.clearSlot(activeSlotId);
-    }
+  const exitToSlotMenu = useCallback(async (): Promise<void> => {
     setHasStarted(false);
     setActiveSlotId(null);
     setState(INITIAL_GAME_STATE);
     setError(null);
     setLoading(false);
     playingRef.current = false;
-    refreshSlots();
+    await refreshSlots();
+  }, [refreshSlots]);
+
+  const restart = useCallback(async (): Promise<void> => {
+    const slotToClear = activeSlotId;
+    setHasStarted(false);
+    setActiveSlotId(null);
+    setState(INITIAL_GAME_STATE);
+    setError(null);
+    setLoading(false);
+    playingRef.current = false;
+    if (slotToClear !== null) {
+      try {
+        await depsRef.current.storage.clearSlot(slotToClear);
+      } catch (err) {
+        depsRef.current.logger.error({
+          requestID: depsRef.current.newRequestID(),
+          feature: 'useGameEngine',
+          action: 'restart_clear_failed',
+          err: serialize(err),
+        });
+      }
+    }
+    await refreshSlots();
   }, [activeSlotId, refreshSlots]);
 
   return {
     state,
     loading,
+    slotsLoading,
     error,
     hasStarted,
     activeSlotId,
     slots,
+    session,
+    login,
+    logout,
     play,
     selectSlot,
     deleteSlot,

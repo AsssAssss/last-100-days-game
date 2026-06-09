@@ -1,3 +1,4 @@
+import type { IStoragePort } from '../../application/ports/IStoragePort';
 import type { GameState } from '../../domain/entities/GameState';
 import {
   SLOT_COUNT,
@@ -25,7 +26,11 @@ function assertValidId(id: SlotId): void {
   }
 }
 
-export class LocalStorageAdapter {
+/**
+ * 把 localStorage 当存档介质的 IStoragePort 实现。
+ * 也是测试里常用的"内存版"载体——传入 fake Storage 即可。
+ */
+export class LocalStorageAdapter implements IStoragePort {
   private readonly storage: StorageLike;
   private readonly now: () => number;
 
@@ -34,15 +39,13 @@ export class LocalStorageAdapter {
     this.now = now;
   }
 
-  /** 把当前状态写入指定槽位。覆盖原有内容。 */
-  saveSlot(id: SlotId, state: GameState): void {
+  async saveSlot(id: SlotId, state: GameState): Promise<void> {
     assertValidId(id);
     const payload: SavedSlot = { state, updatedAt: this.now() };
     this.storage.setItem(keyFor(id), JSON.stringify(payload));
   }
 
-  /** 读取指定槽位的状态；空槽位或 JSON 损坏返回 null。 */
-  loadSlot(id: SlotId): GameState | null {
+  async loadSlot(id: SlotId): Promise<GameState | null> {
     assertValidId(id);
     const raw = this.storage.getItem(keyFor(id));
     if (!raw) return null;
@@ -54,14 +57,12 @@ export class LocalStorageAdapter {
     }
   }
 
-  /** 清空指定槽位。 */
-  clearSlot(id: SlotId): void {
+  async clearSlot(id: SlotId): Promise<void> {
     assertValidId(id);
     this.storage.removeItem(keyFor(id));
   }
 
-  /** 列出全部 SLOT_COUNT 个槽位的概要（含空槽位）。 */
-  listSlots(): SlotSummary[] {
+  async listSlots(): Promise<SlotSummary[]> {
     const summaries: SlotSummary[] = [];
     for (let id = 1; id <= SLOT_COUNT; id++) {
       const raw = this.storage.getItem(keyFor(id));

@@ -1,0 +1,24 @@
+name = "last-100-days-api"
+main = "src/index.ts"
+compatibility_date = "2025-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+# CORS / 前端 origin。本地开发 http://localhost:5174，生产填你 Vercel 的域名。
+# 多个用逗号分隔：例如 "http://localhost:5174,https://last-100-days-game.vercel.app"
+[vars]
+ALLOWED_ORIGINS = "http://localhost:5174"
+
+# Cloudflare D1 数据库绑定
+# 首次使用前在 CF 后台或 CLI 创建：
+#   wrangler d1 create last-100-days
+# 然后把命令输出的 database_id 填到下面
+[[d1_databases]]
+binding = "DB"
+database_name = "last-100-days"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+
+# 私密环境变量通过 `wrangler secret put` 设置（不要写在这里）：
+# - SESSION_SECRET：会话 token 签名密钥（随便一个长字符串）
+# - LLM_API_KEY：你的 one-hub key
+# - LLM_BASE_URL：默认 https://onehub.akacm.com/claude
+# - LLM_MODEL：默认 claude-sonnet-4-6

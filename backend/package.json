@@ -1,0 +1,23 @@
+{
+  "name": "last-100-days-backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:apply:local": "wrangler d1 execute last-100-days --local --file=./schema.sql",
+    "db:apply:remote": "wrangler d1 execute last-100-days --remote --file=./schema.sql",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250620.0",
+    "@vitest/coverage-v8": "^4.1.8",
+    "typescript": "~5.6.3",
+    "vitest": "^4.1.8",
+    "wrangler": "^4.20.0"
+  }
+}
