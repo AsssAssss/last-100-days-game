@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { ChoiceList } from './components/ChoiceList';
 import { FreeInputBox } from './components/FreeInputBox';
 import { GameOverPane } from './components/GameOverPane';
+import { LLMConfigScreen } from './components/LLMConfigScreen';
 import { LoginScreen } from './components/LoginScreen';
 import { NarrativePane } from './components/NarrativePane';
 import { SlotSelectScreen } from './components/SlotSelectScreen';
@@ -10,14 +11,14 @@ import { useGameEngine, type GameEngineDeps } from './hooks/useGameEngine';
 
 interface AppProps {
   deps: GameEngineDeps;
-  /** 关掉入场动画，便于 DOM 测试。 */
+  llmDefaults: { readonly baseURL: string; readonly model: string };
   disableIntroAnimation?: boolean;
 }
 
-export function App({ deps, disableIntroAnimation = false }: AppProps) {
+export function App({ deps, llmDefaults, disableIntroAnimation = false }: AppProps) {
   const engine = useGameEngine(deps);
+  const [showLLMSettings, setShowLLMSettings] = useState(false);
 
-  // 选完 slot 进入游戏后，如果还没有任何叙事（空槽位的全新游戏），自动拉第一回合
   useEffect(() => {
     if (
       engine.hasStarted &&
@@ -42,6 +43,21 @@ export function App({ deps, disableIntroAnimation = false }: AppProps) {
     return <LoginScreen onLogin={engine.login} animate={!disableIntroAnimation} />;
   }
 
+  if (engine.llmConfig === null || showLLMSettings) {
+    return (
+      <LLMConfigScreen
+        initial={engine.llmConfig}
+        defaults={llmDefaults}
+        username={engine.session.username}
+        onSave={(cfg) => {
+          engine.setLLMConfig(cfg);
+          setShowLLMSettings(false);
+        }}
+        onCancel={engine.llmConfig ? () => setShowLLMSettings(false) : undefined}
+      />
+    );
+  }
+
   if (!engine.hasStarted) {
     return (
       <SlotSelectScreen
@@ -51,8 +67,17 @@ export function App({ deps, disableIntroAnimation = false }: AppProps) {
         animate={!disableIntroAnimation}
         extraHeader={
           <div className="text-neutral-500 text-xs tracking-widest text-center mt-2">
-            <span className="text-amber-500">{engine.session.username}</span>{' '}
-            ·{' '}
+            <span className="text-amber-500">{engine.session.username}</span>
+            <span className="mx-2">·</span>
+            <button
+              type="button"
+              data-testid="llm-settings-button"
+              onClick={() => setShowLLMSettings(true)}
+              className="hover:text-amber-400 transition-colors"
+            >
+              LLM 设置
+            </button>
+            <span className="mx-2">·</span>
             <button
               type="button"
               data-testid="logout-button"

@@ -7,6 +7,7 @@ import { INITIAL_GAME_STATE } from '../../domain/entities/GameState';
 import { useGameEngine } from './useGameEngine';
 import type { AuthClient, LoginResult } from '../../adapters/auth/AuthClient';
 import { createBrowserSessionStore } from '../sessionStore';
+import { createBrowserLLMConfigStore } from '../llmConfigStore';
 
 function makeLogger(): ILogger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -51,15 +52,18 @@ function makeDeps(
 ) {
   const mem = makeMemoryStorage();
   const sessionMem = makeMemoryStorage();
+  const llmMem = makeMemoryStorage();
   return {
     llm: mockLLM(),
     logger: makeLogger(),
     storage: new LocalStorageAdapter(mem, () => 12345),
     auth: makeAuth(authResult),
     sessionStore: createBrowserSessionStore(sessionMem),
+    llmConfigStore: createBrowserLLMConfigStore(llmMem),
     newRequestID: () => 'rid',
     _mem: mem,
     _sessionMem: sessionMem,
+    _llmMem: llmMem,
   };
 }
 
@@ -124,6 +128,43 @@ describe('useGameEngine — auth', () => {
     expect(result.current.session).toBeNull();
     expect(result.current.slots).toEqual([]);
     expect(result.current.hasStarted).toBe(false);
+  });
+});
+
+describe('useGameEngine — LLM config', () => {
+  const SAMPLE_CONFIG = {
+    apiKey: 'sk-test',
+    baseURL: 'https://onehub.akacm.com/claude',
+    model: 'claude-sonnet-4-6',
+  };
+
+  it('starts with null llmConfig when nothing stored', () => {
+    const { result } = renderHook(() => useGameEngine(makeDeps()));
+    expect(result.current.llmConfig).toBeNull();
+  });
+
+  it('reads pre-existing llmConfig from store on mount', () => {
+    const deps = makeDeps();
+    deps.llmConfigStore.set(SAMPLE_CONFIG);
+    const { result } = renderHook(() => useGameEngine(deps));
+    expect(result.current.llmConfig).toEqual(SAMPLE_CONFIG);
+  });
+
+  it('setLLMConfig persists to store and updates state', () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useGameEngine(deps));
+    act(() => result.current.setLLMConfig(SAMPLE_CONFIG));
+    expect(result.current.llmConfig).toEqual(SAMPLE_CONFIG);
+    expect(deps.llmConfigStore.get()).toEqual(SAMPLE_CONFIG);
+  });
+
+  it('clearLLMConfig wipes both state and store', () => {
+    const deps = makeDeps();
+    deps.llmConfigStore.set(SAMPLE_CONFIG);
+    const { result } = renderHook(() => useGameEngine(deps));
+    act(() => result.current.clearLLMConfig());
+    expect(result.current.llmConfig).toBeNull();
+    expect(deps.llmConfigStore.get()).toBeNull();
   });
 });
 

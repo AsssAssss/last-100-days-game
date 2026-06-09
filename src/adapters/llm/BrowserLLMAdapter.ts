@@ -9,49 +9,52 @@ import { buildTurnMessage } from './prompts/buildTurnMessage';
 import { SYSTEM_PROMPT } from './prompts/systemPrompt';
 import { GAME_TURN_TOOL, type GameTurnInput } from './prompts/turnToolSchema';
 
-export interface HTTPLLMConfig {
+export interface BrowserLLMConfig {
+  readonly apiKey: string;
   readonly baseURL: string;
-  readonly getToken: () => string | null;
-  readonly model?: string;
-  readonly maxTokens?: number;
+  readonly model: string;
+}
+
+export interface BrowserLLMAdapterDeps {
+  readonly getConfig: () => BrowserLLMConfig | null;
   readonly fetchImpl?: typeof fetch;
+  readonly maxTokens?: number;
 }
 
 const DEFAULT_MAX_TOKENS = 2048;
-const FEATURE = 'HTTPLLMAdapter';
+const FEATURE = 'BrowserLLMAdapter';
 
 /**
- * 走后端 /llm/messages 中转的 LLM 实现。
- * key 在后端，前端只发 messages/tools/tool_choice 等业务参数。
+ * 浏览器直连 Anthropic 兼容端点（onehub / 其他渠道）的 LLM 实现。
+ * 配置来自用户在 UI 里填的 LLM 设置（localStorage）。
+ * 用 fetch 而非官方 SDK——更轻，且能精准控制 headers。
  */
-export class HTTPLLMAdapter implements ILLMPort {
-  private readonly baseURL: string;
-  private readonly getToken: () => string | null;
-  private readonly model: string | undefined;
-  private readonly maxTokens: number;
+export class BrowserLLMAdapter implements ILLMPort {
+  private readonly getConfig: () => BrowserLLMConfig | null;
   private readonly fetchImpl: typeof fetch;
+  private readonly maxTokens: number;
   private readonly logger: ILogger;
 
-  constructor(config: HTTPLLMConfig, logger: ILogger) {
-    this.baseURL = config.baseURL.replace(/\/$/, '');
-    this.getToken = config.getToken;
-    this.model = config.model;
-    this.maxTokens = config.maxTokens ?? DEFAULT_MAX_TOKENS;
-    this.fetchImpl = config.fetchImpl ?? ((input, init) => fetch(input, init));
+  constructor(deps: BrowserLLMAdapterDeps, logger: ILogger) {
+    this.getConfig = deps.getConfig;
+    this.fetchImpl = deps.fetchImpl ?? ((input, init) => fetch(input, init));
+    this.maxTokens = deps.maxTokens ?? DEFAULT_MAX_TOKENS;
     this.logger = logger;
   }
 
   async nextTurn(request: TurnRequest): Promise<RawTurnPatch> {
+    const cfg = this.requireConfig();
     const userText = buildTurnMessage(request.state, request.playerInput);
+
     this.logger.debug({
       requestID: request.requestID,
       feature: FEATURE,
-      action: 'llm_proxy_start',
-      req: { day: request.state.day },
+      action: 'llm_call_start',
+      req: { day: request.state.day, model: cfg.model },
     });
 
     const body = {
-      ...(this.model ? { model: this.model } : {}),
+      model: cfg.model,
       max_tokens: this.maxTokens,
       system: [
         {
@@ -65,7 +68,7 @@ export class HTTPLLMAdapter implements ILLMPort {
       messages: [{ role: 'user', content: userText }],
     };
 
-    const resp = await this.callBackend(body);
+    const resp = await this.callUpstream(cfg, body);
     const block = (resp.content ?? []).find(
       (b: { type: string; name?: string }) => b.type === 'tool_use'
     );
@@ -82,6 +85,7 @@ export class HTTPLLMAdapter implements ILLMPort {
   }
 
   async compressMemory(request: CompressMemoryRequest): Promise<string> {
+    const cfg = this.requireConfig();
     const lines: string[] = [];
     lines.push('请把下面这些天的事件压缩成 3-5 句中文摘要，保留对未来叙事可能有用的人物、地点、伤亡、承诺等关键信息。');
     if (request.priorSummaries.length > 0) {
@@ -96,7 +100,7 @@ export class HTTPLLMAdapter implements ILLMPort {
     }
 
     const body = {
-      ...(this.model ? { model: this.model } : {}),
+      model: cfg.model,
       max_tokens: 512,
       messages: [{ role: 'user', content: lines.join('\n') }],
     };
@@ -104,11 +108,11 @@ export class HTTPLLMAdapter implements ILLMPort {
     this.logger.debug({
       requestID: request.requestID,
       feature: FEATURE,
-      action: 'compress_proxy_start',
+      action: 'compress_start',
       req: { count: request.notesToCompress.length },
     });
 
-    const resp = await this.callBackend(body);
+    const resp = await this.callUpstream(cfg, body);
     const textBlock = (resp.content ?? []).find(
       (b: { type: string }) => b.type === 'text'
     );
@@ -123,16 +127,27 @@ export class HTTPLLMAdapter implements ILLMPort {
     return (textBlock as { text: string }).text.trim();
   }
 
-  private async callBackend(body: unknown): Promise<{
+  private requireConfig(): BrowserLLMConfig {
+    const cfg = this.getConfig();
+    if (!cfg || !cfg.apiKey || !cfg.baseURL || !cfg.model) {
+      throw new Error('llm_not_configured');
+    }
+    return cfg;
+  }
+
+  private async callUpstream(
+    cfg: BrowserLLMConfig,
+    body: unknown
+  ): Promise<{
     content?: Array<{ type: string; name?: string; text?: string; input?: unknown }>;
     stop_reason?: string;
   }> {
-    const token = this.getToken();
-    if (!token) throw new Error('not_authenticated');
-    const resp = await this.fetchImpl(`${this.baseURL}/llm/messages`, {
+    const url = cfg.baseURL.replace(/\/$/, '') + '/v1/messages';
+    const resp = await this.fetchImpl(url, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${token}`,
+        'x-api-key': cfg.apiKey,
+        'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
       body: JSON.stringify(body),

@@ -59,6 +59,11 @@ export async function proxyMessages(
     'x-api-key': config.apiKey,
     'anthropic-version': '2023-06-01',
     'content-type': 'application/json',
+    // 加个浏览器风 UA：有些 CF-fronted 后端会对裸 cloud worker IP + 默认 UA 不友好
+    'user-agent':
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    accept: 'application/json, text/event-stream',
+    'accept-encoding': 'identity',
   };
   for (const name of FORWARD_HEADERS_TO_LLM) {
     const v = request.headers.get(name);
@@ -66,15 +71,25 @@ export async function proxyMessages(
   }
   headers['x-api-key'] = config.apiKey; // 强制覆盖，前端不能伪造
 
-  const upstream = await fetchWithRetry(
-    fetchFn,
-    `${base}/v1/messages`,
-    {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    }
-  );
+  const upstreamURL = `${base}/v1/messages`;
+  const reqBodyStr = JSON.stringify(body);
+  console.log(JSON.stringify({
+    event: 'llm_upstream_req',
+    url: upstreamURL,
+    bodyBytes: reqBodyStr.length,
+    hasSystem: 'system' in body,
+    hasTools: 'tools' in body,
+    hasCacheControl: reqBodyStr.includes('cache_control'),
+  }));
+  const upstream = await fetchWithRetry(fetchFn, upstreamURL, {
+    method: 'POST',
+    headers,
+    body: reqBodyStr,
+  });
+  console.log(JSON.stringify({
+    event: 'llm_upstream_resp',
+    status: upstream.status,
+  }));
 
   const respHeaders = new Headers();
   upstream.headers.forEach((value, key) => {
@@ -85,6 +100,13 @@ export async function proxyMessages(
   respHeaders.set('content-type', 'application/json');
 
   const text = await upstream.text();
+  if (upstream.status >= 400) {
+    console.log(JSON.stringify({
+      event: 'llm_upstream_err_body',
+      status: upstream.status,
+      bodyPreview: text.slice(0, 500),
+    }));
+  }
   return new Response(text, {
     status: upstream.status,
     headers: respHeaders,

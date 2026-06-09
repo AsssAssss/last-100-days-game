@@ -3,13 +3,19 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import { App } from './ui/App';
 import { AuthClient } from './adapters/auth/AuthClient';
-import { HTTPLLMAdapter } from './adapters/llm/HTTPLLMAdapter';
+import { BrowserLLMAdapter } from './adapters/llm/BrowserLLMAdapter';
 import { StructuredLogger } from './adapters/logger/StructuredLogger';
 import { HTTPStorageAdapter } from './adapters/storage/HTTPStorageAdapter';
 import { newRequestID } from './adapters/util/requestID';
 import { createBrowserSessionStore } from './ui/sessionStore';
+import { createBrowserLLMConfigStore } from './ui/llmConfigStore';
 
 const backendURL = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.replace(/\/$/, '');
+const llmDefaultBaseURL =
+  (import.meta.env.VITE_LLM_DEFAULT_BASE_URL as string | undefined) ??
+  'https://onehub.akacm.com/claude';
+const llmDefaultModel =
+  (import.meta.env.VITE_LLM_DEFAULT_MODEL as string | undefined) ?? 'claude-sonnet-4-6';
 
 if (!backendURL) {
   const root = document.getElementById('root');
@@ -24,11 +30,15 @@ if (!backendURL) {
 } else {
   const logger = new StructuredLogger();
   const sessionStore = createBrowserSessionStore(window.localStorage);
+  const llmConfigStore = createBrowserLLMConfigStore(window.localStorage);
   const getToken = () => sessionStore.get()?.token ?? null;
 
   const auth = new AuthClient({ baseURL: backendURL });
   const storage = new HTTPStorageAdapter({ baseURL: backendURL, getToken });
-  const llm = new HTTPLLMAdapter({ baseURL: backendURL, getToken }, logger);
+  const llm = new BrowserLLMAdapter(
+    { getConfig: () => llmConfigStore.get() },
+    logger
+  );
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
@@ -39,8 +49,10 @@ if (!backendURL) {
           storage,
           auth,
           sessionStore,
+          llmConfigStore,
           newRequestID,
         }}
+        llmDefaults={{ baseURL: llmDefaultBaseURL, model: llmDefaultModel }}
       />
     </StrictMode>
   );
