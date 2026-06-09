@@ -28,7 +28,7 @@ export class AuthClient {
 
   constructor(config: AuthClientConfig) {
     this.baseURL = config.baseURL.replace(/\/$/, '');
-    this.fetchImpl = config.fetchImpl ?? fetch;
+    this.fetchImpl = config.fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
   async login(username: string, pin: string): Promise<LoginResult> {

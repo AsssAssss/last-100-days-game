@@ -25,7 +25,7 @@ export class HTTPStorageAdapter implements IStoragePort {
   constructor(config: HTTPStorageConfig) {
     this.baseURL = config.baseURL.replace(/\/$/, '');
     this.getToken = config.getToken;
-    this.fetchImpl = config.fetchImpl ?? fetch;
+    this.fetchImpl = config.fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
   async listSlots(): Promise<readonly SlotSummary[]> {

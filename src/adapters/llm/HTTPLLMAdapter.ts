@@ -37,7 +37,7 @@ export class HTTPLLMAdapter implements ILLMPort {
     this.getToken = config.getToken;
     this.model = config.model;
     this.maxTokens = config.maxTokens ?? DEFAULT_MAX_TOKENS;
-    this.fetchImpl = config.fetchImpl ?? fetch;
+    this.fetchImpl = config.fetchImpl ?? ((input, init) => fetch(input, init));
     this.logger = logger;
   }
 
