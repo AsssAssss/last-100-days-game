@@ -157,6 +157,47 @@ describe('proxyMessages', () => {
     expect(resp.headers.get('content-type')).toBe('application/json');
   });
 
+  it('retries on 522 and succeeds on retry', async () => {
+    let attempts = 0;
+    const fetchImpl = vi.fn(async () => {
+      attempts += 1;
+      if (attempts < 2) return new Response('timeout', { status: 522 });
+      return new Response(JSON.stringify({ content: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    const resp = await proxyMessages(
+      makeReq({ messages: [] }),
+      { apiKey: 'k' },
+      { fetchImpl }
+    );
+    expect(resp.status).toBe(200);
+    expect(attempts).toBe(2);
+  }, 15000);
+
+  it('gives up after MAX_RETRIES and returns last 5xx', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response('still down', { status: 522 })
+    ) as unknown as typeof fetch;
+    const resp = await proxyMessages(
+      makeReq({ messages: [] }),
+      { apiKey: 'k' },
+      { fetchImpl }
+    );
+    expect(resp.status).toBe(522);
+    expect((fetchImpl as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(3);
+  }, 15000);
+
+  it('retries on network error and surfaces last error', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('network down');
+    }) as unknown as typeof fetch;
+    await expect(
+      proxyMessages(makeReq({ messages: [] }), { apiKey: 'k' }, { fetchImpl })
+    ).rejects.toThrow(/network down/);
+  }, 15000);
+
   it('preserves non-hop-by-hop upstream headers', async () => {
     const fetchImpl: typeof fetch = vi.fn(async () =>
       new Response('{}', {

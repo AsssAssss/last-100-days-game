@@ -6,6 +6,9 @@
 
 const DEFAULT_BASE_URL = 'https://onehub.akacm.com/claude';
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
+const RETRY_ON_STATUS = new Set([502, 503, 504, 522, 524]);
+const MAX_RETRIES = 2;
+const RETRY_BASE_DELAY_MS = 800;
 
 export interface LLMProxyConfig {
   readonly apiKey: string;
@@ -63,11 +66,15 @@ export async function proxyMessages(
   }
   headers['x-api-key'] = config.apiKey; // 强制覆盖，前端不能伪造
 
-  const upstream = await fetchFn(`${base}/v1/messages`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  const upstream = await fetchWithRetry(
+    fetchFn,
+    `${base}/v1/messages`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    }
+  );
 
   const respHeaders = new Headers();
   upstream.headers.forEach((value, key) => {
@@ -82,4 +89,35 @@ export async function proxyMessages(
     status: upstream.status,
     headers: respHeaders,
   });
+}
+
+/**
+ * 对 5xx 自动重试，指数退避（800ms → 1600ms）。
+ * 网络错误同样重试。
+ */
+async function fetchWithRetry(
+  fetchFn: typeof fetch,
+  url: string,
+  init: RequestInit
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const resp = await fetchFn(url, init);
+      if (!RETRY_ON_STATUS.has(resp.status) || attempt === MAX_RETRIES) {
+        return resp;
+      }
+      lastError = new Error(`upstream returned ${resp.status}`);
+    } catch (err) {
+      lastError = err;
+      if (attempt === MAX_RETRIES) throw err;
+    }
+    await sleep(RETRY_BASE_DELAY_MS * Math.pow(2, attempt));
+  }
+  // unreachable but TS needs a return
+  throw lastError ?? new Error('fetchWithRetry exhausted retries');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
