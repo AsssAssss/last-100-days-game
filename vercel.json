@@ -5,6 +5,10 @@
   "outputDirectory": "dist",
   "installCommand": "npm install",
   "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://last-100-days-api.2518486059.workers.dev/:path*"
+    },
     { "source": "/(.*)", "destination": "/" }
   ]
 }

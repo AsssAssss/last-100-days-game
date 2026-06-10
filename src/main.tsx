@@ -10,19 +10,16 @@ import { newRequestID } from './adapters/util/requestID';
 import { createBrowserSessionStore } from './ui/sessionStore';
 import { STORY_CONTENT } from './content';
 
-const backendURL = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.replace(/\/$/, '');
+/**
+ * 后端地址。默认 '/api'——生产环境由 vercel.json 的 rewrite 同源代理到 Worker，
+ * 浏览器全程只跟当前域名通信（无 CORS、不受 workers.dev 可达性影响）。
+ * 本地开发可在 .env.local 覆盖为 http://127.0.0.1:8787 或远程 Worker 地址。
+ */
+const backendURL = (
+  (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? '/api'
+).replace(/\/$/, '');
 
-if (!backendURL) {
-  const root = document.getElementById('root');
-  if (root) {
-    root.innerHTML =
-      '<div style="padding:32px;color:#f59e0b;font-family:monospace;line-height:1.6">' +
-      '请在项目根目录创建 <code>.env.local</code>，填入 <code>VITE_BACKEND_URL</code>。<br/>' +
-      '本地开发：<code>http://127.0.0.1:8787</code>（wrangler dev）<br/>' +
-      '生产：<code>https://your-worker.workers.dev</code>' +
-      '</div>';
-  }
-} else {
+{
   const logger = new StructuredLogger();
   const sessionStore = createBrowserSessionStore(window.localStorage);
   const getToken = () => sessionStore.get()?.token ?? null;
