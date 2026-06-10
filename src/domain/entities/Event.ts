@@ -1,3 +1,4 @@
+import type { ScriptState } from './GameState';
 import type { Inventory } from './Inventory';
 import type { ResourceDelta } from './Resources';
 
@@ -32,4 +33,6 @@ export interface TurnEvent {
   readonly dayPassed: boolean;
   /** 感染状态变更；undefined = 本回合感染状态无操作（倒计时仍由引擎自动递减）。 */
   readonly infection?: InfectionCommand;
+  /** 固定剧本模式：本回合后的完整剧本进度（整体替换）。undefined = 不修改。 */
+  readonly scriptPatch?: ScriptState;
 }

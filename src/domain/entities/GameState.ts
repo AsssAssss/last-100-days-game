@@ -18,6 +18,32 @@ export interface InfectionState {
 /** 被咬后允许截肢自救（clear 指令生效）的回合窗口；超过后引擎拒绝 clear。 */
 export const AMPUTATION_WINDOW_TURNS = 2;
 
+/** 人性值范围与初始值（0=彻底恶徒，100=圣人）。 */
+export const HUMANITY_MIN = 0;
+export const HUMANITY_MAX = 100;
+export const HUMANITY_INITIAL = 50;
+/** ≥ 此值解锁好人线分支。 */
+export const HUMANITY_GOOD_THRESHOLD = 65;
+/** ≤ 此值解锁恶人线分支。 */
+export const HUMANITY_EVIL_THRESHOLD = 35;
+
+/**
+ * 固定剧本模式的进度状态。
+ * 由 ScriptedStoryAdapter 全权计算，经 scriptPatch 整体替换写回。
+ */
+export interface ScriptState {
+  /** 当前所在剧本节点 id。 */
+  readonly nodeId: string;
+  /** 人性值 0-100。 */
+  readonly humanity: number;
+  /** 剧情旗标（'saved-chenbo'、'visited:act01/xxx' 等）。 */
+  readonly flags: readonly string[];
+  /** seeded RNG 当前种子（每次随机判定后演化），保证存档可复现。 */
+  readonly seed: number;
+  /** 已抽过的 once 事件卡 id。 */
+  readonly drawnOnce: readonly string[];
+}
+
 export interface GameState {
   readonly day: number;
   readonly resources: Resources;
@@ -25,6 +51,8 @@ export interface GameState {
   readonly memory: StoryMemory;
   /** 当前感染状态；null = 未感染。旧存档无此字段，按未感染处理。 */
   readonly infection?: InfectionState | null;
+  /** 固定剧本进度；undefined = 尚未开始（开场回合由剧本适配器初始化）。 */
+  readonly script?: ScriptState;
   /** 最近一次叙事文本，用于在玩家选择时再次展示给 LLM。 */
   readonly lastNarrative: string;
   /** 当前可选项；空数组表示游戏结束或开局。 */

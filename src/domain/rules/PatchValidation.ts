@@ -1,4 +1,5 @@
 import type { InfectionCommand, TurnEvent } from '../entities/Event';
+import type { ScriptState } from '../entities/GameState';
 import type { ResourceDelta } from '../entities/Resources';
 
 /**
@@ -27,6 +28,11 @@ export interface RawTurnPatch {
       readonly cause?: string;
       readonly turnsUntilDeath?: number;
     };
+    /**
+     * 固定剧本模式专用：本回合后的完整剧本进度。
+     * 来源是本地 ScriptedStoryAdapter（可信代码），原样透传不做校验。
+     */
+    readonly scriptPatch?: ScriptState;
   };
 }
 
@@ -174,6 +180,7 @@ export function validateAndClamp(raw: RawTurnPatch): ValidationResult {
     gameOverReason: raw.statePatch.gameOverReason,
     dayPassed,
     infection,
+    scriptPatch: raw.statePatch.scriptPatch,
   };
 
   return { event, issues };

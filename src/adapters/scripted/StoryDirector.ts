@@ -1,0 +1,109 @@
+import {
+  GOTO_DIRECTOR,
+  type EventCard,
+  type StoryContent,
+  type StoryNode,
+} from '../../content/schema';
+import {
+  HUMANITY_EVIL_THRESHOLD,
+  HUMANITY_GOOD_THRESHOLD,
+  type GameState,
+  type ScriptState,
+} from '../../domain/entities/GameState';
+import { evalConditions } from './conditions';
+import { pickWeighted } from './rng';
+
+/** 兜底节点：无主线锚点且卡池抽空时的"平静的一天"。 */
+export const QUIET_DAY_NODE: StoryNode = {
+  id: '@quiet-day',
+  act: 0,
+  narrative:
+    '这一天什么也没有发生。你换了一处藏身点，检查了装备，在墙上又划了一道。末日里最难熬的不是危险，是危险之间漫长的、空荡荡的等待。',
+  choices: [
+    {
+      label: '熬过这一天',
+      effects: { dayPassed: true },
+      goto: GOTO_DIRECTOR,
+    },
+  ],
+};
+
+export interface DirectorPick {
+  /** 选中的节点（主线锚点 / 事件卡 / 兜底）。 */
+  readonly node: StoryNode | EventCard;
+  /** 演化后的种子。 */
+  readonly nextSeed: number;
+  /** 若抽中 once 卡，其 id（调用方记入 drawnOnce）。 */
+  readonly drawnOnceId?: string;
+  /** 若选中主线锚点，其 id（调用方记 visited 旗标）。 */
+  readonly anchorId?: string;
+}
+
+/** day → 幕（1-10）。 */
+export function actOfDay(day: number): number {
+  return Math.min(10, Math.floor((day - 1) / 10) + 1);
+}
+
+function visitedFlag(nodeId: string): string {
+  return `visited:${nodeId}`;
+}
+
+/**
+ * 调度器：goto='@director' 时决定下一个节点。
+ * 优先未访问且已到期（dayAnchor ≤ effectiveDay）的主线锚点（取 dayAnchor 最小者）；
+ * 没有则按当前幕 + 善恶线从事件卡池抽一张；卡池抽干则给兜底"平静的一天"。
+ */
+export function directNext(
+  content: StoryContent,
+  state: GameState,
+  script: ScriptState,
+  effectiveDay: number
+): DirectorPick {
+  // 1) 到期主线锚点
+  const pendingAnchors: StoryNode[] = [];
+  for (const node of content.nodes.values()) {
+    if (node.dayAnchor === undefined) continue;
+    if (node.dayAnchor > effectiveDay) continue;
+    if (script.flags.includes(visitedFlag(node.id))) continue;
+    if (!evalConditions(node.requires, state, script)) continue;
+    pendingAnchors.push(node);
+  }
+  if (pendingAnchors.length > 0) {
+    pendingAnchors.sort(
+      (a, b) => (a.dayAnchor! - b.dayAnchor!) || a.id.localeCompare(b.id)
+    );
+    return { node: pendingAnchors[0], nextSeed: script.seed, anchorId: pendingAnchors[0].id };
+  }
+
+  // 2) 事件卡
+  const act = actOfDay(effectiveDay);
+  const eligible = content.events.filter((card) => {
+    if (act < card.acts[0] || act > card.acts[1]) return false;
+    if (card.pool === 'good' && script.humanity < HUMANITY_GOOD_THRESHOLD) return false;
+    if (card.pool === 'evil' && script.humanity > HUMANITY_EVIL_THRESHOLD) return false;
+    if (card.once && script.drawnOnce.includes(card.id)) return false;
+    if (!evalConditions(card.requires, state, script)) return false;
+    return true;
+  });
+  if (eligible.length > 0) {
+    const { picked, nextSeed } = pickWeighted(eligible, () => 1, script.seed);
+    return {
+      node: picked,
+      nextSeed,
+      drawnOnceId: picked.once ? picked.id : undefined,
+    };
+  }
+
+  // 3) 兜底
+  return { node: QUIET_DAY_NODE, nextSeed: script.seed };
+}
+
+/** 按 id 解析节点：兜底节点 → 主线节点 → 事件卡。找不到抛错（内容缺陷尽早暴露）。 */
+export function resolveNode(content: StoryContent, id: string): StoryNode | EventCard {
+  if (id === QUIET_DAY_NODE.id) return QUIET_DAY_NODE;
+  const node = content.nodes.get(id);
+  if (node) return node;
+  const card = content.events.find((e) => e.id === id);
+  if (card) return card;
+  throw new Error(`story node not found: ${id}`);
+}

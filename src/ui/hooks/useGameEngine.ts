@@ -9,9 +9,7 @@ import type { ILogger } from '../../application/ports/ILogger';
 import type { IStoragePort } from '../../application/ports/IStoragePort';
 import { resolveChoice } from '../../application/usecases/ResolveChoice';
 import type { AuthClient, LoginResult } from '../../adapters/auth/AuthClient';
-import type { BrowserLLMConfig } from '../../adapters/llm/BrowserLLMAdapter';
 import type { Session, SessionStore } from '../sessionStore';
-import type { LLMConfigStore } from '../llmConfigStore';
 
 export interface GameEngineDeps {
   llm: ILLMPort;
@@ -19,7 +17,6 @@ export interface GameEngineDeps {
   storage: IStoragePort;
   auth: AuthClient;
   sessionStore: SessionStore;
-  llmConfigStore: LLMConfigStore;
   newRequestID: () => string;
 }
 
@@ -32,12 +29,9 @@ export interface GameEngine {
   activeSlotId: SlotId | null;
   slots: readonly SlotSummary[];
   session: Session | null;
-  llmConfig: BrowserLLMConfig | null;
 
   login(username: string, pin: string): Promise<LoginResult>;
   logout(): void;
-  setLLMConfig(config: BrowserLLMConfig): void;
-  clearLLMConfig(): void;
 
   play(input: string | null): void;
   selectSlot(id: SlotId): Promise<void>;
@@ -56,9 +50,6 @@ export function useGameEngine(deps: GameEngineDeps): GameEngine {
   const [slots, setSlots] = useState<SlotSummary[]>([]);
   const [session, setSessionState] = useState<Session | null>(() =>
     deps.sessionStore.get()
-  );
-  const [llmConfig, setLLMConfigState] = useState<BrowserLLMConfig | null>(() =>
-    deps.llmConfigStore.get()
   );
 
   const depsRef = useRef(deps);
@@ -148,16 +139,6 @@ export function useGameEngine(deps: GameEngineDeps): GameEngine {
     setSlots([]);
     playingRef.current = false;
   }, [setSession]);
-
-  const setLLMConfig = useCallback((config: BrowserLLMConfig) => {
-    depsRef.current.llmConfigStore.set(config);
-    setLLMConfigState(config);
-  }, []);
-
-  const clearLLMConfig = useCallback(() => {
-    depsRef.current.llmConfigStore.set(null);
-    setLLMConfigState(null);
-  }, []);
 
   const play = useCallback((input: string | null) => {
     if (playingRef.current) return;
@@ -262,11 +243,8 @@ export function useGameEngine(deps: GameEngineDeps): GameEngine {
     activeSlotId,
     slots,
     session,
-    llmConfig,
     login,
     logout,
-    setLLMConfig,
-    clearLLMConfig,
     play,
     selectSlot,
     deleteSlot,

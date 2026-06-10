@@ -23,6 +23,15 @@ export function StatusBar({ state }: StatusBarProps) {
         DAY {state.day} <span className="text-neutral-600">/ 100</span>
       </div>
 
+      {state.script && (
+        <div data-testid="humanity-indicator" className="text-xs text-neutral-500">
+          人性：
+          <span className={humanityTier(state.script.humanity).color}>
+            {humanityTier(state.script.humanity).label}
+          </span>
+        </div>
+      )}
+
       {state.infection && (
         <div
           data-testid="infection-banner"
@@ -74,6 +83,14 @@ export function StatusBar({ state }: StatusBarProps) {
       </div>
     </aside>
   );
+}
+
+function humanityTier(humanity: number): { label: string; color: string } {
+  if (humanity >= 80) return { label: '圣人', color: 'text-emerald-400' };
+  if (humanity >= 65) return { label: '善良', color: 'text-emerald-500' };
+  if (humanity > 35) return { label: '摇摆', color: 'text-neutral-300' };
+  if (humanity > 20) return { label: '冷酷', color: 'text-orange-400' };
+  return { label: '恶徒', color: 'text-red-500' };
 }
 
 function barColor(key: string, value: number, max: number): string {

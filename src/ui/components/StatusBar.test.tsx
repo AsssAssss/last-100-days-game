@@ -72,6 +72,31 @@ describe('StatusBar', () => {
     expect(row.querySelector(`.${expectedClass}`)).toBeInTheDocument();
   });
 
+  describe('humanity indicator', () => {
+    it('is hidden when no script state (legacy/non-scripted save)', () => {
+      render(<StatusBar state={INITIAL_GAME_STATE} />);
+      expect(screen.queryByTestId('humanity-indicator')).not.toBeInTheDocument();
+    });
+
+    it.each([
+      [85, '圣人'],
+      [70, '善良'],
+      [50, '摇摆'],
+      [30, '冷酷'],
+      [10, '恶徒'],
+    ])('humanity=%i shows tier %s', (humanity, label) => {
+      render(
+        <StatusBar
+          state={{
+            ...INITIAL_GAME_STATE,
+            script: { nodeId: 'x', humanity, flags: [], seed: 1, drawnOnce: [] },
+          }}
+        />
+      );
+      expect(screen.getByTestId('humanity-indicator')).toHaveTextContent(label);
+    });
+  });
+
   describe('infection banner', () => {
     it('is hidden when not infected', () => {
       render(<StatusBar state={INITIAL_GAME_STATE} />);

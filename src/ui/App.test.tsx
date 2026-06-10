@@ -7,10 +7,6 @@ import type { AuthClient, LoginResult } from '../adapters/auth/AuthClient';
 import { INITIAL_GAME_STATE } from '../domain/entities/GameState';
 import { App } from './App';
 import { createBrowserSessionStore } from './sessionStore';
-import { createBrowserLLMConfigStore } from './llmConfigStore';
-
-const LLM_DEFAULTS = { baseURL: 'https://onehub.akacm.com/claude', model: 'claude-sonnet-4-6' };
-const SAMPLE_LLM_CONFIG = { apiKey: 'sk-test', ...LLM_DEFAULTS };
 
 function makeLogger(): ILogger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -55,18 +51,12 @@ function makeDeps(
     storage?: LocalStorageAdapter;
     auth?: AuthClient;
     preloggedIn?: boolean;
-    preconfiguredLLM?: boolean;
   } = {}
 ) {
   const sessionMem = makeMem();
   const sessionStore = createBrowserSessionStore(sessionMem);
-  const llmMem = makeMem();
-  const llmConfigStore = createBrowserLLMConfigStore(llmMem);
   if (over.preloggedIn) {
     sessionStore.set({ userId: 'u', token: 't', username: 'xiaoxue' });
-  }
-  if (over.preconfiguredLLM !== false) {
-    llmConfigStore.set(SAMPLE_LLM_CONFIG);
   }
   return {
     llm: over.llm ?? makeLLM(),
@@ -74,17 +64,13 @@ function makeDeps(
     storage: over.storage ?? new LocalStorageAdapter(makeMem(), () => 1_700_000_000_000),
     auth: over.auth ?? makeAuth(),
     sessionStore,
-    llmConfigStore,
     newRequestID: () => 'rid',
     _sessionMem: sessionMem,
-    _llmMem: llmMem,
   };
 }
 
 function renderApp(deps: ReturnType<typeof makeDeps>) {
-  return render(
-    <App deps={deps} llmDefaults={LLM_DEFAULTS} disableIntroAnimation={true} />
-  );
+  return render(<App deps={deps} disableIntroAnimation={true} />);
 }
 
 async function loginThrough(deps: ReturnType<typeof makeDeps>) {
@@ -120,34 +106,6 @@ describe('App — login flow', () => {
 
   it('shows slot screen directly when session already exists', () => {
     renderApp(makeDeps({ preloggedIn: true }));
-    expect(screen.getByTestId('slot-select-screen')).toBeInTheDocument();
-  });
-});
-
-describe('App — LLM config gate', () => {
-  it('shows LLM config screen when logged in but no LLM config', () => {
-    renderApp(makeDeps({ preloggedIn: true, preconfiguredLLM: false }));
-    expect(screen.getByTestId('llm-config-screen')).toBeInTheDocument();
-  });
-
-  it('after saving LLM config, advances to slot screen', () => {
-    renderApp(makeDeps({ preloggedIn: true, preconfiguredLLM: false }));
-    fireEvent.change(screen.getByTestId('llm-key'), { target: { value: 'sk-test' } });
-    fireEvent.submit(screen.getByTestId('llm-config-form'));
-    expect(screen.getByTestId('slot-select-screen')).toBeInTheDocument();
-  });
-
-  it('clicking "LLM 设置" on slot screen opens config screen', () => {
-    renderApp(makeDeps({ preloggedIn: true }));
-    fireEvent.click(screen.getByTestId('llm-settings-button'));
-    expect(screen.getByTestId('llm-config-screen')).toBeInTheDocument();
-    expect(screen.getByTestId('llm-config-cancel')).toBeInTheDocument();
-  });
-
-  it('cancel on settings (re-edit) goes back to slot screen', () => {
-    renderApp(makeDeps({ preloggedIn: true }));
-    fireEvent.click(screen.getByTestId('llm-settings-button'));
-    fireEvent.click(screen.getByTestId('llm-config-cancel'));
     expect(screen.getByTestId('slot-select-screen')).toBeInTheDocument();
   });
 });
@@ -199,18 +157,6 @@ describe('App — gameplay (after login)', () => {
     fireEvent.click(screen.getByTestId('slot-1'));
     await waitFor(() => screen.getByTestId('choice-0'));
     fireEvent.click(screen.getByTestId('choice-0'));
-    await waitFor(() => expect(deps.llm.nextTurn).toHaveBeenCalledTimes(2));
-  });
-
-  it('advances state on free input submission', async () => {
-    const deps = makeDeps({ preloggedIn: true });
-    renderApp(deps);
-    await waitFor(() => screen.getByTestId('slot-1'));
-    fireEvent.click(screen.getByTestId('slot-1'));
-    // 等第一回合 LLM 跑完，否则 FreeInputBox 还是 disabled 状态，submit 会被吞
-    await waitFor(() => screen.getByTestId('choice-0'));
-    fireEvent.change(screen.getByTestId('free-input'), { target: { value: '砸碎车窗' } });
-    fireEvent.submit(screen.getByTestId('free-input-form'));
     await waitFor(() => expect(deps.llm.nextTurn).toHaveBeenCalledTimes(2));
   });
 
