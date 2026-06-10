@@ -4,24 +4,27 @@ import {
   type StoryContent,
   type StoryNode,
 } from '../../content/schema';
+import { DAWN_NODES, DUSK_NODES, NIGHT_QUIET_NODE } from '../../content/nights';
 import {
+  DAY_TURN_LIMIT,
   HUMANITY_EVIL_THRESHOLD,
   HUMANITY_GOOD_THRESHOLD,
+  NIGHT_TURN_LIMIT,
   type GameState,
   type ScriptState,
 } from '../../domain/entities/GameState';
 import { evalConditions } from './conditions';
-import { pickWeighted } from './rng';
+import { nextRandom, pickWeighted } from './rng';
 
-/** 兜底节点：无主线锚点且卡池抽空时的"平静的一天"。 */
+/** 白天卡池抽空时的兜底：直接消磨过整天。 */
 export const QUIET_DAY_NODE: StoryNode = {
   id: '@quiet-day',
   act: 0,
   narrative:
-    '这一天什么也没有发生。你换了一处藏身点，检查了装备，在墙上又划了一道。末日里最难熬的不是危险，是危险之间漫长的、空荡荡的等待。',
+    '这一天什么也没有发生。你换了一处藏身点，检查了装备，把刀在磨石上来回蹭了几十下，又在墙上新划了一道。末日里最难熬的不是危险，是危险之间漫长的、空荡荡的等待——它给你时间想起那些你拼命不去想的人和事。',
   choices: [
     {
-      label: '熬过这一天',
+      label: '把这一天熬过去',
       effects: { dayPassed: true },
       goto: GOTO_DIRECTOR,
     },
@@ -29,7 +32,7 @@ export const QUIET_DAY_NODE: StoryNode = {
 };
 
 export interface DirectorPick {
-  /** 选中的节点（主线锚点 / 事件卡 / 兜底）。 */
+  /** 选中的节点（主线锚点 / 事件卡 / 过场 / 兜底）。 */
   readonly node: StoryNode | EventCard;
   /** 演化后的种子。 */
   readonly nextSeed: number;
@@ -48,10 +51,27 @@ function visitedFlag(nodeId: string): string {
   return `visited:${nodeId}`;
 }
 
+function pickVariant(
+  variants: readonly StoryNode[],
+  seed: number
+): { node: StoryNode; nextSeed: number } {
+  const { value, nextSeed } = nextRandom(seed);
+  return { node: variants[Math.floor(value * variants.length)] ?? variants[0], nextSeed };
+}
+
 /**
  * 调度器：goto='@director' 时决定下一个节点。
- * 优先未访问且已到期（dayAnchor ≤ effectiveDay）的主线锚点（取 dayAnchor 最小者）；
- * 没有则按当前幕 + 善恶线从事件卡池抽一张；卡池抽干则给兜底"平静的一天"。
+ *
+ * 白天（phase='day'）：
+ *   1. 回合数 ≥ DAY_TURN_LIMIT → 强制黄昏抉择（休整一晚 / 夜间行动）
+ *   2. 到期主线锚点（dayAnchor ≤ effectiveDay，未访问，门控满足）取最早者
+ *   3. 白天事件卡（time ≠ 'night'）
+ *   4. 兜底：平静的一天
+ *
+ * 夜晚（phase='night'）：
+ *   1. 回合数 ≥ NIGHT_TURN_LIMIT → 强制黎明（睡到天亮）
+ *   2. 夜晚事件卡（time = 'night'，高危）
+ *   3. 兜底：无事的夜
  */
 export function directNext(
   content: StoryContent,
@@ -59,7 +79,25 @@ export function directNext(
   script: ScriptState,
   effectiveDay: number
 ): DirectorPick {
-  // 1) 到期主线锚点
+  const phase = script.phase ?? 'day';
+  const turns = script.turnsInPhase ?? 0;
+
+  if (phase === 'night') {
+    if (turns >= NIGHT_TURN_LIMIT) {
+      const { node, nextSeed } = pickVariant(DAWN_NODES, script.seed);
+      return { node, nextSeed };
+    }
+    const card = drawCard(content, state, script, effectiveDay, 'night');
+    if (card) return card;
+    return { node: NIGHT_QUIET_NODE, nextSeed: script.seed };
+  }
+
+  // —— 白天 ——
+  if (turns >= DAY_TURN_LIMIT) {
+    const { node, nextSeed } = pickVariant(DUSK_NODES, script.seed);
+    return { node, nextSeed };
+  }
+
   const pendingAnchors: StoryNode[] = [];
   for (const node of content.nodes.values()) {
     if (node.dayAnchor === undefined) continue;
@@ -75,9 +113,21 @@ export function directNext(
     return { node: pendingAnchors[0], nextSeed: script.seed, anchorId: pendingAnchors[0].id };
   }
 
-  // 2) 事件卡
+  const card = drawCard(content, state, script, effectiveDay, 'day');
+  if (card) return card;
+  return { node: QUIET_DAY_NODE, nextSeed: script.seed };
+}
+
+function drawCard(
+  content: StoryContent,
+  state: GameState,
+  script: ScriptState,
+  effectiveDay: number,
+  time: 'day' | 'night'
+): DirectorPick | null {
   const act = actOfDay(effectiveDay);
   const eligible = content.events.filter((card) => {
+    if ((card.time ?? 'day') !== time) return false;
     if (act < card.acts[0] || act > card.acts[1]) return false;
     if (card.pool === 'good' && script.humanity < HUMANITY_GOOD_THRESHOLD) return false;
     if (card.pool === 'evil' && script.humanity > HUMANITY_EVIL_THRESHOLD) return false;
@@ -85,22 +135,24 @@ export function directNext(
     if (!evalConditions(card.requires, state, script)) return false;
     return true;
   });
-  if (eligible.length > 0) {
-    const { picked, nextSeed } = pickWeighted(eligible, () => 1, script.seed);
-    return {
-      node: picked,
-      nextSeed,
-      drawnOnceId: picked.once ? picked.id : undefined,
-    };
-  }
-
-  // 3) 兜底
-  return { node: QUIET_DAY_NODE, nextSeed: script.seed };
+  if (eligible.length === 0) return null;
+  const { picked, nextSeed } = pickWeighted(eligible, () => 1, script.seed);
+  return {
+    node: picked,
+    nextSeed,
+    drawnOnceId: picked.once ? picked.id : undefined,
+  };
 }
 
-/** 按 id 解析节点：兜底节点 → 主线节点 → 事件卡。找不到抛错（内容缺陷尽早暴露）。 */
+/** 引擎内置的系统节点（不依赖内容包）：兜底日 + 黄昏/黎明/无事的夜。 */
+const BUILTIN_NODES: ReadonlyMap<string, StoryNode> = new Map(
+  [QUIET_DAY_NODE, ...DUSK_NODES, ...DAWN_NODES, NIGHT_QUIET_NODE].map((n) => [n.id, n])
+);
+
+/** 按 id 解析节点：内置系统节点 → 主线节点 → 事件卡。找不到抛错（内容缺陷尽早暴露）。 */
 export function resolveNode(content: StoryContent, id: string): StoryNode | EventCard {
-  if (id === QUIET_DAY_NODE.id) return QUIET_DAY_NODE;
+  const builtin = BUILTIN_NODES.get(id);
+  if (builtin) return builtin;
   const node = content.nodes.get(id);
   if (node) return node;
   const card = content.events.find((e) => e.id === id);

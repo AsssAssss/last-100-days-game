@@ -10,6 +10,8 @@ import type { ILogger } from '../../application/ports/ILogger';
 import {
   DAILY_FOOD_UPKEEP,
   DAILY_WATER_UPKEEP,
+  SYSTEM_REST_LABEL,
+  SYSTEM_SLEEP_LABEL,
   ScriptedStoryAdapter,
 } from './ScriptedStoryAdapter';
 
@@ -256,6 +258,114 @@ describe('ScriptedStoryAdapter — director integration', () => {
     const state = stateWithScript({ nodeId: 't/direct', flags: [] });
     const patch = await turn(adapter, state, 'go');
     expect(patch.statePatch.scriptPatch?.flags).toContain('visited:t/anchor-d2');
+  });
+});
+
+describe('ScriptedStoryAdapter — 昼夜与系统选项', () => {
+  const DAY_CARD: EventCard = {
+    id: 'evt/t-day-card',
+    pool: 'common',
+    acts: [1, 10],
+    narrative: '白天的卡。',
+    choices: [{ label: '继续', goto: GOTO_DIRECTOR }],
+  };
+  const NIGHT_CARD: EventCard = {
+    id: 'evt/t-night-card',
+    pool: 'common',
+    time: 'night',
+    acts: [1, 10],
+    narrative: '夜里的卡。',
+    choices: [{ label: '硬闯', goto: GOTO_DIRECTOR }],
+  };
+  const PHASE_CONTENT = buildContent('t/start', [NODES], [DAY_CARD, NIGHT_CARD]);
+
+  function phaseAdapter(seed = 9) {
+    return new ScriptedStoryAdapter(PHASE_CONTENT, makeLogger(), { newSeed: () => seed });
+  }
+
+  it('每个行动回合递增 turnsInPhase', async () => {
+    const patch = await turn(phaseAdapter(), stateWithScript({ turnsInPhase: 4 }), '搜刮');
+    expect(patch.statePatch.scriptPatch?.turnsInPhase).toBe(5);
+    expect(patch.statePatch.scriptPatch?.phase).toBe('day');
+  });
+
+  it('dayPassed 重置回合并回到白天', async () => {
+    const patch = await turn(
+      phaseAdapter(),
+      stateWithScript({ phase: 'night', turnsInPhase: 7 }),
+      '休息一天'
+    );
+    expect(patch.statePatch.scriptPatch?.phase).toBe('day');
+    expect(patch.statePatch.scriptPatch?.turnsInPhase).toBe(0);
+  });
+
+  it('白天回合耗尽后回调度器得到黄昏节点', async () => {
+    const state = stateWithScript({ nodeId: 'evt/t-day-card', turnsInPhase: 14 });
+    const patch = await turn(phaseAdapter(), state, '继续');
+    expect(patch.statePatch.scriptPatch?.nodeId).toMatch(/^night\/dusk-/);
+    // 黄昏节点提供休整/夜行两个选项
+    expect(patch.choices.length).toBe(2);
+  });
+
+  it('白天事件卡注入"收工过夜"系统选项，且可被选择', async () => {
+    const state = stateWithScript({ nodeId: 't/next', turnsInPhase: 1 });
+    // t/next 的"过一天"goto director；day=1 锚点 d2 到期……为避免锚点干扰直接呈现卡
+    const opening = await turn(phaseAdapter(), { ...stateWithScript({ nodeId: 'evt/t-day-card' }) }, null);
+    expect(opening.choices).toContain(SYSTEM_REST_LABEL);
+
+    const rest = await turn(
+      phaseAdapter(),
+      stateWithScript({ nodeId: 'evt/t-day-card', turnsInPhase: 2 }),
+      SYSTEM_REST_LABEL
+    );
+    expect(rest.statePatch.scriptPatch?.nodeId).toMatch(/^night\/dusk-/);
+    void state;
+  });
+
+  it('主线节点不注入系统选项', async () => {
+    const opening = await turn(phaseAdapter(), stateWithScript(), null);
+    expect(opening.choices).not.toContain(SYSTEM_REST_LABEL);
+    expect(opening.choices).not.toContain(SYSTEM_SLEEP_LABEL);
+  });
+
+  it('夜晚事件卡注入"睡到天亮"，选择后回到第二天白天', async () => {
+    const opening = await turn(
+      phaseAdapter(),
+      { ...stateWithScript({ nodeId: 'evt/t-night-card', phase: 'night', turnsInPhase: 3 }) },
+      null
+    );
+    expect(opening.choices).toContain(SYSTEM_SLEEP_LABEL);
+
+    const sleep = await turn(
+      phaseAdapter(),
+      stateWithScript({ nodeId: 'evt/t-night-card', phase: 'night', turnsInPhase: 3 }),
+      SYSTEM_SLEEP_LABEL
+    );
+    expect(sleep.statePatch.dayPassed).toBe(true);
+    expect(sleep.statePatch.scriptPatch?.phase).toBe('day');
+    expect(sleep.statePatch.scriptPatch?.turnsInPhase).toBe(0);
+  });
+
+  it('黄昏节点选择"夜行"进入夜晚（setPhase）并重置回合', async () => {
+    // 直接站上 dusk-1 选夜行
+    const dusk = await turn(
+      phaseAdapter(),
+      stateWithScript({ nodeId: 'night/dusk-1', turnsInPhase: 15 }),
+      '黑夜是另一张地图——今晚出去行动'
+    );
+    expect(dusk.statePatch.scriptPatch?.phase).toBe('night');
+    expect(dusk.statePatch.scriptPatch?.turnsInPhase).toBe(0);
+    // 夜晚第一回合：抽到夜卡
+    expect(dusk.statePatch.scriptPatch?.nodeId).toBe('evt/t-night-card');
+  });
+
+  it('夜晚回合耗尽后强制黎明，黎明唯一出口回到白天', async () => {
+    const patch = await turn(
+      phaseAdapter(),
+      stateWithScript({ nodeId: 'evt/t-night-card', phase: 'night', turnsInPhase: 9 }),
+      '硬闯'
+    );
+    expect(patch.statePatch.scriptPatch?.nodeId).toMatch(/^night\/dawn-/);
   });
 });
 

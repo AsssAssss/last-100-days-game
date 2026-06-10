@@ -72,6 +72,51 @@ describe('StatusBar', () => {
     expect(row.querySelector(`.${expectedClass}`)).toBeInTheDocument();
   });
 
+  describe('phase indicator', () => {
+    it('is hidden without script state', () => {
+      render(<StatusBar state={INITIAL_GAME_STATE} />);
+      expect(screen.queryByTestId('phase-indicator')).not.toBeInTheDocument();
+    });
+
+    it('shows day phase with turn progress', () => {
+      render(
+        <StatusBar
+          state={{
+            ...INITIAL_GAME_STATE,
+            script: { nodeId: 'x', humanity: 50, flags: [], seed: 1, drawnOnce: [], phase: 'day', turnsInPhase: 4 },
+          }}
+        />
+      );
+      expect(screen.getByTestId('phase-indicator')).toHaveTextContent('白天');
+      expect(screen.getByTestId('phase-indicator')).toHaveTextContent('5/15');
+    });
+
+    it('shows night phase with turn progress', () => {
+      render(
+        <StatusBar
+          state={{
+            ...INITIAL_GAME_STATE,
+            script: { nodeId: 'x', humanity: 50, flags: [], seed: 1, drawnOnce: [], phase: 'night', turnsInPhase: 0 },
+          }}
+        />
+      );
+      expect(screen.getByTestId('phase-indicator')).toHaveTextContent('夜晚');
+      expect(screen.getByTestId('phase-indicator')).toHaveTextContent('1/10');
+    });
+
+    it('defaults to day when phase is missing (legacy script state)', () => {
+      render(
+        <StatusBar
+          state={{
+            ...INITIAL_GAME_STATE,
+            script: { nodeId: 'x', humanity: 50, flags: [], seed: 1, drawnOnce: [] },
+          }}
+        />
+      );
+      expect(screen.getByTestId('phase-indicator')).toHaveTextContent('白天');
+    });
+  });
+
   describe('humanity indicator', () => {
     it('is hidden when no script state (legacy/non-scripted save)', () => {
       render(<StatusBar state={INITIAL_GAME_STATE} />);

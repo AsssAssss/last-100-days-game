@@ -25,8 +25,10 @@ export interface Effects {
     readonly cause?: string;
     readonly turnsUntilDeath?: number;
   };
-  /** 本选项结束当天（夜宿/长途）。 */
+  /** 本选项结束当天（睡到第二天白天）。隐含回到白天时段并重置回合计数。 */
   readonly dayPassed?: boolean;
+  /** 切换时段（黄昏抉择"夜间行动"用 setPhase: 'night'）。重置时段回合计数。 */
+  readonly setPhase?: 'day' | 'night';
   /** 写入剧情记忆（StatusBar 之外的存档摘要）。 */
   readonly memoryNote?: string;
 }
@@ -69,12 +71,14 @@ export interface StoryNode {
 
 export type EventPool = 'common' | 'good' | 'evil';
 
-/** 随机事件卡：在没有主线锚点的日子由调度器抽取。 */
+/** 随机事件卡：在没有主线锚点的回合由调度器抽取。 */
 export interface EventCard {
   readonly id: string;
   readonly pool: EventPool;
   /** 可出现的幕区间 [from, to]（含端点）。 */
   readonly acts: readonly [number, number];
+  /** 出现时段；缺省 'day'。夜晚只抽 'night' 卡（更危险）。 */
+  readonly time?: 'day' | 'night';
   /** 一局限抽一次。 */
   readonly once?: boolean;
   readonly narrative: string;

@@ -227,7 +227,7 @@ export const ACT01_NODES: readonly StoryNode[] = [
       },
       {
         label: '太冒险了，去别处碰运气',
-        effects: { dayPassed: true, memoryNote: '放弃了可疑的超市' },
+        effects: { memoryNote: '放弃了可疑的超市' },
         goto: GOTO_DIRECTOR,
       },
     ],
@@ -246,7 +246,6 @@ export const ACT01_NODES: readonly StoryNode[] = [
         label: '只拿外面货架的，见好就收',
         effects: {
           resources: { food: 5, water: 4 },
-          dayPassed: true,
           memoryNote: '超市外场搜到一批物资',
         },
         goto: GOTO_DIRECTOR,
@@ -270,7 +269,6 @@ export const ACT01_NODES: readonly StoryNode[] = [
         label: '听话，倒退着出去',
         effects: {
           resources: { food: 3, water: 2 },
-          dayPassed: true,
           memoryNote: '内仓有怪味，搜了外场就撤',
         },
         goto: GOTO_DIRECTOR,
@@ -288,7 +286,6 @@ export const ACT01_NODES: readonly StoryNode[] = [
         effects: {
           resources: { food: 8, water: 6 },
           addItems: ['一瓶医用酒精'],
-          dayPassed: true,
           memoryNote: '超市内仓大丰收，也第一次看见菌毯',
         },
         goto: GOTO_DIRECTOR,
@@ -313,7 +310,6 @@ export const ACT01_NODES: readonly StoryNode[] = [
         label: '丢下背包侧袋的口粮，滚出门外',
         effects: {
           resources: { food: -4, hp: -8, sanity: -8 },
-          dayPassed: true,
           memoryNote: '被潜伏者伏击，丢了口粮才脱身',
         },
         goto: GOTO_DIRECTOR,
@@ -331,7 +327,6 @@ export const ACT01_NODES: readonly StoryNode[] = [
         effects: {
           resources: { food: 8, water: 6 },
           addItems: ['一瓶医用酒精'],
-          dayPassed: true,
           memoryNote: '杀死潜伏者后清空了超市内仓',
         },
         goto: GOTO_DIRECTOR,
@@ -348,7 +343,6 @@ export const ACT01_NODES: readonly StoryNode[] = [
         label: '找个安全处清点收获',
         effects: {
           resources: { food: 4, water: 2 },
-          dayPassed: true,
           memoryNote: '速抢超市得手',
         },
         goto: GOTO_DIRECTOR,
@@ -389,7 +383,6 @@ export const ACT01_NODES: readonly StoryNode[] = [
         label: '跑到安全处，检查伤势',
         effects: {
           resources: { hp: -12, food: 2, sanity: -6 },
-          dayPassed: true,
           memoryNote: '从奔跑者爪下抢出超市，挂了彩',
         },
         goto: GOTO_DIRECTOR,
@@ -445,7 +438,6 @@ export const ACT01_NODES: readonly StoryNode[] = [
           resources: { food: 5, water: 3, hp: 8 },
           addItems: ['陈伯的手绘地图'],
           setFlags: ['has-map', 'knows-clicker-rule'],
-          dayPassed: true,
           memoryNote: '陈伯赠图授课："听见咔嗒声就趴下别动"',
         },
         goto: GOTO_DIRECTOR,
@@ -474,7 +466,6 @@ export const ACT01_NODES: readonly StoryNode[] = [
           resources: { sanity: -12 },
           addItems: ['陈伯的手绘地图', '一个铁皮药箱'],
           setFlags: ['map-warning'],
-          dayPassed: true,
           memoryNote: '看着老医师断气，拿走了他的地图和药箱',
         },
         goto: GOTO_DIRECTOR,
@@ -547,7 +538,6 @@ export const ACT01_NODES: readonly StoryNode[] = [
     choices: [
       {
         label: '收好药箱，继续赶路',
-        effects: { dayPassed: true },
         goto: GOTO_DIRECTOR,
       },
     ],
@@ -560,7 +550,6 @@ export const ACT01_NODES: readonly StoryNode[] = [
     choices: [
       {
         label: '把这条街甩在身后',
-        effects: { dayPassed: true },
         goto: GOTO_DIRECTOR,
       },
     ],

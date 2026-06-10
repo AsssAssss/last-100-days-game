@@ -42,7 +42,20 @@ export interface ScriptState {
   readonly seed: number;
   /** 已抽过的 once 事件卡 id。 */
   readonly drawnOnce: readonly string[];
+  /** 当前时段；旧存档无此字段按白天处理。 */
+  readonly phase?: 'day' | 'night';
+  /**
+   * 当前时段已消耗的行动回合数。
+   * 白天满 DAY_TURN_LIMIT 强制入夜；夜晚满 NIGHT_TURN_LIMIT 强制天亮。
+   * dayPassed / 进入夜晚时归零。旧存档无此字段按 0 处理。
+   */
+  readonly turnsInPhase?: number;
 }
+
+/** 白天行动回合上限，满了强制进入黄昏抉择。 */
+export const DAY_TURN_LIMIT = 15;
+/** 夜晚行动回合上限，满了强制天亮。 */
+export const NIGHT_TURN_LIMIT = 10;
 
 export interface GameState {
   readonly day: number;

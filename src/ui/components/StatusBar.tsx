@@ -1,4 +1,8 @@
-import type { GameState } from '../../domain/entities/GameState';
+import {
+  DAY_TURN_LIMIT,
+  NIGHT_TURN_LIMIT,
+  type GameState,
+} from '../../domain/entities/GameState';
 import { MAX_RESOURCES } from '../../domain/entities/Resources';
 
 interface StatusBarProps {
@@ -22,6 +26,20 @@ export function StatusBar({ state }: StatusBarProps) {
       <div className="text-amber-400 font-bold tracking-wider">
         DAY {state.day} <span className="text-neutral-600">/ 100</span>
       </div>
+
+      {state.script && (
+        <div data-testid="phase-indicator" className="text-xs text-neutral-500">
+          {(state.script.phase ?? 'day') === 'night' ? (
+            <span className="text-indigo-300">
+              🌙 夜晚 · 第 {(state.script.turnsInPhase ?? 0) + 1}/{NIGHT_TURN_LIMIT} 回合
+            </span>
+          ) : (
+            <span className="text-amber-200">
+              ☀️ 白天 · 第 {(state.script.turnsInPhase ?? 0) + 1}/{DAY_TURN_LIMIT} 回合
+            </span>
+          )}
+        </div>
+      )}
 
       {state.script && (
         <div data-testid="humanity-indicator" className="text-xs text-neutral-500">

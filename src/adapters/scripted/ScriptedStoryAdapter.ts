@@ -30,6 +30,30 @@ const FEATURE = 'ScriptedStoryAdapter';
 export const DAILY_FOOD_UPKEEP = 1;
 export const DAILY_WATER_UPKEEP = 1;
 
+/** 系统注入选项：白天事件卡上随时可收工过夜。 */
+export const SYSTEM_REST_LABEL = '🌙 收工，找地方过夜';
+/** 系统注入选项：夜晚事件卡上随时可结束冒险睡觉。 */
+export const SYSTEM_SLEEP_LABEL = '🛌 不再冒险，睡到天亮';
+
+const SYSTEM_REST_CHOICE: ScriptedChoice = {
+  label: SYSTEM_REST_LABEL,
+  goto: [
+    { to: 'night/dusk-1', weight: 1 },
+    { to: 'night/dusk-2', weight: 1 },
+    { to: 'night/dusk-3', weight: 1 },
+  ],
+};
+
+const SYSTEM_SLEEP_CHOICE: ScriptedChoice = {
+  label: SYSTEM_SLEEP_LABEL,
+  effects: {
+    resources: { hp: 2, sanity: 3 },
+    dayPassed: true,
+    memoryNote: '夜半收手，睡到天亮',
+  },
+  goto: GOTO_DIRECTOR,
+};
+
 export interface ScriptedAdapterDeps {
   /** 新开局的随机种子来源；测试注入固定值。 */
   readonly newSeed?: () => number;
@@ -43,10 +67,20 @@ function visitedFlag(nodeId: string): string {
   return `visited:${nodeId}`;
 }
 
+/** 是否在该节点上注入系统时段选项（只在事件卡上注入，不打断主线场景与过场节点）。 */
+function systemChoiceFor(nodeId: string, phase: 'day' | 'night'): ScriptedChoice | null {
+  if (!nodeId.startsWith('evt/')) return null;
+  return phase === 'night' ? SYSTEM_SLEEP_CHOICE : SYSTEM_REST_CHOICE;
+}
+
 /**
  * 固定剧本引擎——实现 ILLMPort，零网络、零 token。
- * 剧情进度（nodeId/humanity/flags/seed/drawnOnce）放在 GameState.script，
- * 经 statePatch.scriptPatch 整体替换写回。
+ * 剧情进度（nodeId/humanity/flags/seed/drawnOnce/phase/turnsInPhase）放在
+ * GameState.script，经 statePatch.scriptPatch 整体替换写回。
+ *
+ * 昼夜节奏：白天最多 DAY_TURN_LIMIT 个行动回合（满了强制黄昏抉择），
+ * 夜晚最多 NIGHT_TURN_LIMIT 个（满了强制天亮）；
+ * 事件卡上始终注入"收工过夜 / 睡到天亮"系统选项。
  */
 export class ScriptedStoryAdapter implements ILLMPort {
   private readonly content: StoryContent;
@@ -66,7 +100,13 @@ export class ScriptedStoryAdapter implements ILLMPort {
       requestID,
       feature: FEATURE,
       action: 'turn_start',
-      req: { day: state.day, nodeId: state.script?.nodeId, playerInput },
+      req: {
+        day: state.day,
+        nodeId: state.script?.nodeId,
+        phase: state.script?.phase ?? 'day',
+        turnsInPhase: state.script?.turnsInPhase ?? 0,
+        playerInput,
+      },
     });
 
     if (!state.script || playerInput === null) {
@@ -83,6 +123,8 @@ export class ScriptedStoryAdapter implements ILLMPort {
       flags: [visitedFlag(this.content.startNodeId)],
       seed: this.newSeed(),
       drawnOnce: [],
+      phase: 'day',
+      turnsInPhase: 0,
     };
     const node = resolveNode(this.content, script.nodeId);
     this.logger.debug({
@@ -102,9 +144,17 @@ export class ScriptedStoryAdapter implements ILLMPort {
     requestID: string
   ): RawTurnPatch {
     const current = resolveNode(this.content, script.nodeId);
-    const choice = current.choices.find(
+    const phaseNow: 'day' | 'night' = script.phase ?? 'day';
+
+    let choice = current.choices.find(
       (c) => c.label === playerInput && evalConditions(c.requires, state, script)
     );
+    if (!choice) {
+      const system = systemChoiceFor(current.id, phaseNow);
+      if (system && system.label === playerInput) {
+        choice = system;
+      }
+    }
 
     if (!choice) {
       // UI 与存档不同步的极端情况：重新呈现当前节点而不是崩溃
@@ -119,6 +169,17 @@ export class ScriptedStoryAdapter implements ILLMPort {
 
     const effects = choice.effects ?? {};
 
+    // 时段与回合计数：每个行动消耗 1 回合；dayPassed 回到第二天白天；setPhase 切时段
+    let phase: 'day' | 'night' = phaseNow;
+    let turnsInPhase = (script.turnsInPhase ?? 0) + 1;
+    if (effects.dayPassed) {
+      phase = 'day';
+      turnsInPhase = 0;
+    } else if (effects.setPhase) {
+      phase = effects.setPhase;
+      turnsInPhase = 0;
+    }
+
     // 解析跳转（可能消耗随机数）
     let seed = script.seed;
     let targetId: string;
@@ -130,7 +191,7 @@ export class ScriptedStoryAdapter implements ILLMPort {
       targetId = picked.to;
     }
 
-    // 中间剧本状态（director 需要看到本回合的 humanity/flags 变化）
+    // 中间剧本状态（director 需要看到本回合的 humanity/flags/时段变化）
     let flags = applyFlagChanges(script.flags, effects);
     let drawnOnce = script.drawnOnce;
     const humanity = clampHumanity(script.humanity + (effects.humanityDelta ?? 0));
@@ -138,7 +199,15 @@ export class ScriptedStoryAdapter implements ILLMPort {
     let target: StoryNode | EventCard;
     if (targetId === GOTO_DIRECTOR) {
       const effectiveDay = state.day + (effects.dayPassed ? 1 : 0);
-      const interim: ScriptState = { nodeId: current.id, humanity, flags, seed, drawnOnce };
+      const interim: ScriptState = {
+        nodeId: current.id,
+        humanity,
+        flags,
+        seed,
+        drawnOnce,
+        phase,
+        turnsInPhase,
+      };
       const pick = directNext(this.content, state, interim, effectiveDay);
       target = pick.node;
       seed = pick.nextSeed;
@@ -157,6 +226,8 @@ export class ScriptedStoryAdapter implements ILLMPort {
       flags,
       seed,
       drawnOnce,
+      phase,
+      turnsInPhase,
     };
 
     this.logger.debug({
@@ -168,6 +239,8 @@ export class ScriptedStoryAdapter implements ILLMPort {
         choice: choice.label,
         to: target.id,
         humanity,
+        phase,
+        turnsInPhase,
         dayPassed: !!effects.dayPassed,
       },
     });
@@ -192,11 +265,16 @@ export class ScriptedStoryAdapter implements ILLMPort {
       resources.water = (resources.water ?? 0) - DAILY_WATER_UPKEEP;
     }
 
+    let choices: string[] = [];
+    if (!ending) {
+      choices = visibleChoices(node.choices, state, script).map((c) => c.label);
+      const system = systemChoiceFor(node.id, script.phase ?? 'day');
+      if (system) choices.push(system.label);
+    }
+
     return {
       narrative: node.narrative,
-      choices: ending
-        ? []
-        : visibleChoices(node.choices, state, script).map((c) => c.label),
+      choices,
       statePatch: {
         resources,
         inventoryAdd: applyEffects ? [...(effects.addItems ?? [])] : [],

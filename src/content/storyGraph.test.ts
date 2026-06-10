@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { STORY_CONTENT } from './index';
 import { GOTO_DIRECTOR, type ScriptedChoice, type StoryNode } from './schema';
 import { QUIET_DAY_NODE } from '../adapters/scripted/StoryDirector';
+import { NIGHT_EVENTS, NIGHT_SYSTEM_NODES } from './nights';
 
 /**
  * 剧情图静态校验——内容作者的安全网。
@@ -12,15 +13,19 @@ const ALL_UNITS = [
   ...STORY_CONTENT.nodes.values(),
   ...STORY_CONTENT.events,
   QUIET_DAY_NODE,
+  ...NIGHT_SYSTEM_NODES,
 ];
+void NIGHT_EVENTS; // 已包含在 STORY_CONTENT.events
 
 function gotoTargets(choice: ScriptedChoice): string[] {
   if (typeof choice.goto === 'string') return [choice.goto];
   return choice.goto.map((g) => g.to);
 }
 
+const SYSTEM_IDS = new Set([QUIET_DAY_NODE.id, ...NIGHT_SYSTEM_NODES.map((n) => n.id)]);
+
 function isResolvable(id: string): boolean {
-  if (id === GOTO_DIRECTOR || id === QUIET_DAY_NODE.id) return true;
+  if (id === GOTO_DIRECTOR || SYSTEM_IDS.has(id)) return true;
   if (STORY_CONTENT.nodes.has(id)) return true;
   return STORY_CONTENT.events.some((e) => e.id === id);
 }
@@ -66,14 +71,33 @@ describe('storyGraph — 结构完整性', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('所有回到调度器的选项必须 dayPassed=true（防同日死循环）', () => {
+  it('黎明节点（night/dawn-*）的所有选项必须 dayPassed=true', () => {
     const offenders: string[] = [];
     for (const unit of ALL_UNITS) {
+      if (!unit.id.startsWith('night/dawn')) continue;
       for (const choice of unit.choices) {
-        const targets = gotoTargets(choice);
-        if (targets.includes(GOTO_DIRECTOR) && !choice.effects?.dayPassed) {
-          offenders.push(`${unit.id} -[${choice.label}]`);
-        }
+        if (!choice.effects?.dayPassed) offenders.push(`${unit.id} -[${choice.label}]`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('黄昏节点（night/dusk-*）必须同时提供"休整(dayPassed)"和"夜行(setPhase night)"', () => {
+    for (const unit of ALL_UNITS) {
+      if (!unit.id.startsWith('night/dusk')) continue;
+      const hasRest = unit.choices.some((c) => c.effects?.dayPassed === true);
+      const hasNight = unit.choices.some((c) => c.effects?.setPhase === 'night');
+      expect(hasRest, `${unit.id} 缺休整选项`).toBe(true);
+      expect(hasNight, `${unit.id} 缺夜行选项`).toBe(true);
+    }
+  });
+
+  it('夜晚卡（time=night）不得出现 setPhase=night（已在夜里）', () => {
+    const offenders: string[] = [];
+    for (const card of STORY_CONTENT.events) {
+      if ((card.time ?? 'day') !== 'night') continue;
+      for (const choice of card.choices) {
+        if (choice.effects?.setPhase === 'night') offenders.push(`${card.id} -[${choice.label}]`);
       }
     }
     expect(offenders).toEqual([]);

@@ -2,7 +2,7 @@ import { GOTO_DIRECTOR, type EventCard } from '../schema';
 
 /**
  * 通用事件卡池（M1 先放 10 张验证系统，M5 扩到 80）。
- * 约定：每张卡的所有出口 choice 都应标 dayPassed（一张卡 = 一天的非剧情日）。
+ * 昼夜节奏下事件卡只消耗回合不消耗天数；只有"整天语义"的卡（雨天休整等）标 dayPassed。
  */
 export const COMMON_EVENTS: readonly EventCard[] = [
   {
@@ -37,14 +37,12 @@ export const COMMON_EVENTS: readonly EventCard[] = [
         effects: {
           resources: { food: -2, sanity: 5 },
           humanityDelta: 4,
-          dayPassed: true,
           memoryNote: '喂了一条流浪狗',
         },
         goto: GOTO_DIRECTOR,
       },
       {
         label: '挥手赶走它',
-        effects: { dayPassed: true },
         goto: GOTO_DIRECTOR,
       },
       {
@@ -52,7 +50,6 @@ export const COMMON_EVENTS: readonly EventCard[] = [
         effects: {
           resources: { food: 6, sanity: -10 },
           humanityDelta: -10,
-          dayPassed: true,
           memoryNote: '杀了那条跟着你的狗',
         },
         goto: GOTO_DIRECTOR,
@@ -75,7 +72,6 @@ export const COMMON_EVENTS: readonly EventCard[] = [
       },
       {
         label: '太蹊跷了，绕开走',
-        effects: { dayPassed: true },
         goto: GOTO_DIRECTOR,
       },
     ],
@@ -91,7 +87,6 @@ export const COMMON_EVENTS: readonly EventCard[] = [
         label: '带上物资离开',
         effects: {
           resources: { food: 5, water: 3 },
-          dayPassed: true,
           memoryNote: '搜刮了车中死者的登山包',
         },
         goto: GOTO_DIRECTOR,
@@ -109,7 +104,6 @@ export const COMMON_EVENTS: readonly EventCard[] = [
         label: '不要回头，一直跑',
         effects: {
           resources: { food: 2, sanity: -6, hp: -4 },
-          dayPassed: true,
           memoryNote: '车里的"尸体"是活的，狼狈逃脱',
         },
         goto: GOTO_DIRECTOR,
@@ -125,7 +119,7 @@ export const COMMON_EVENTS: readonly EventCard[] = [
     choices: [
       {
         label: '睡不着了，提前出发',
-        effects: { resources: { sanity: -5 }, dayPassed: true, memoryNote: '被噩梦惊醒的一天' },
+        effects: { resources: { sanity: -5 }, memoryNote: '被噩梦惊醒的一天' },
         goto: GOTO_DIRECTOR,
       },
     ],
@@ -144,14 +138,12 @@ export const COMMON_EVENTS: readonly EventCard[] = [
           addItems: ['手摇收音机'],
           resources: { sanity: 4 },
           setFlags: ['heard-broadcast'],
-          dayPassed: true,
           memoryNote: '捡到收音机，101.7 上有活人的声音',
         },
         goto: GOTO_DIRECTOR,
       },
       {
         label: '太重了，不带',
-        effects: { dayPassed: true },
         goto: GOTO_DIRECTOR,
       },
     ],
@@ -186,7 +178,6 @@ export const COMMON_EVENTS: readonly EventCard[] = [
         requires: [{ kind: 'resource', resource: 'water', min: 6 }],
         effects: {
           resources: { water: -5, food: 6 },
-          dayPassed: true,
           memoryNote: '和行脚商人换了补给',
         },
         goto: GOTO_DIRECTOR,
@@ -196,14 +187,12 @@ export const COMMON_EVENTS: readonly EventCard[] = [
         requires: [{ kind: 'resource', resource: 'food', min: 6 }],
         effects: {
           resources: { food: -5, water: 6 },
-          dayPassed: true,
           memoryNote: '和行脚商人换了水',
         },
         goto: GOTO_DIRECTOR,
       },
       {
         label: '点头致意，各走各路',
-        effects: { dayPassed: true },
         goto: GOTO_DIRECTOR,
       },
     ],
@@ -217,7 +206,7 @@ export const COMMON_EVENTS: readonly EventCard[] = [
     choices: [
       {
         label: '原路退回，绕远路',
-        effects: { resources: { sanity: -2 }, dayPassed: true, memoryNote: '绕开了巷子里的奔跑者' },
+        effects: { resources: { sanity: -2 }, memoryNote: '绕开了巷子里的奔跑者' },
         goto: GOTO_DIRECTOR,
       },
       {
@@ -241,7 +230,6 @@ export const COMMON_EVENTS: readonly EventCard[] = [
         effects: {
           resources: { sanity: -3 },
           addItems: ['小半包香烟'],
-          dayPassed: true,
           memoryNote: '背刺解决了巷中的奔跑者',
         },
         goto: GOTO_DIRECTOR,
@@ -259,7 +247,6 @@ export const COMMON_EVENTS: readonly EventCard[] = [
         label: '检查伤口，心有余悸地离开',
         effects: {
           resources: { hp: -10, sanity: -8 },
-          dayPassed: true,
           memoryNote: '偷袭失手，差点被咬',
         },
         goto: GOTO_DIRECTOR,

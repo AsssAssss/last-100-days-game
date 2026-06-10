@@ -181,6 +181,70 @@ describe('directNext — event cards', () => {
   });
 });
 
+describe('directNext — 昼夜节奏', () => {
+  const VISITED_ALL = [
+    'visited:n/anchor-d3',
+    'visited:n/anchor-d5',
+    'visited:n/anchor-evil',
+  ];
+
+  it('白天回合数达到 DAY_TURN_LIMIT 时强制给黄昏节点', () => {
+    const s = script({ phase: 'day', turnsInPhase: 15 });
+    const pick = directNext(CONTENT, INITIAL_GAME_STATE, s, 2);
+    expect(pick.node.id).toMatch(/^night\/dusk-/);
+  });
+
+  it('白天回合未满时不给黄昏（正常给锚点）', () => {
+    const s = script({ phase: 'day', turnsInPhase: 14 });
+    const pick = directNext(CONTENT, INITIAL_GAME_STATE, s, 5);
+    expect(pick.node.id).toBe('n/anchor-d3');
+  });
+
+  it('夜晚回合数达到 NIGHT_TURN_LIMIT 时强制天亮', () => {
+    const s = script({ phase: 'night', turnsInPhase: 10, flags: VISITED_ALL });
+    const pick = directNext(CONTENT, INITIAL_GAME_STATE, s, 2);
+    expect(pick.node.id).toMatch(/^night\/dawn-/);
+  });
+
+  it('夜晚不触发主线锚点、只抽 night 卡；卡池无 night 卡时兜底无事的夜', () => {
+    // 合成内容里没有 time:night 卡 → night/quiet
+    const s = script({ phase: 'night', turnsInPhase: 0 });
+    const pick = directNext(CONTENT, INITIAL_GAME_STATE, s, 5); // 锚点 d3 到期但不应触发
+    expect(pick.node.id).toBe('night/quiet');
+  });
+
+  it('夜晚抽到 time=night 的卡', () => {
+    const nightCard: EventCard = {
+      id: 'evt/n-test',
+      pool: 'common',
+      time: 'night',
+      acts: [1, 10],
+      narrative: '夜测试',
+      choices: [{ label: 'x', goto: GOTO_DIRECTOR }],
+    };
+    const content = buildContent('n/start', [NODES], [...CARDS, nightCard]);
+    const s = script({ phase: 'night', turnsInPhase: 3 });
+    const pick = directNext(content, INITIAL_GAME_STATE, s, 5);
+    expect(pick.node.id).toBe('evt/n-test');
+  });
+
+  it('白天不抽 night 卡', () => {
+    const nightOnly = buildContent('n/start', [NODES], [
+      {
+        id: 'evt/n-only',
+        pool: 'common',
+        time: 'night',
+        acts: [1, 10],
+        narrative: '夜专属',
+        choices: [{ label: 'x', goto: GOTO_DIRECTOR }],
+      },
+    ]);
+    const s = script({ phase: 'day', turnsInPhase: 0, flags: VISITED_ALL });
+    const pick = directNext(nightOnly, INITIAL_GAME_STATE, s, 6);
+    expect(pick.node.id).toBe('@quiet-day');
+  });
+});
+
 describe('resolveNode', () => {
   it('resolves builtin quiet day', () => {
     expect(resolveNode(CONTENT, QUIET_DAY_NODE.id).id).toBe(QUIET_DAY_NODE.id);
