@@ -194,11 +194,11 @@ describe('storyGraph — 数值与文案约束', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('叙事不为空且长度合理', () => {
+  it('叙事达到小说级篇幅（主线/卡片 ≥150 字）', () => {
     const offenders: string[] = [];
     for (const unit of ALL_UNITS) {
-      if (unit.narrative.trim().length < 20) {
-        offenders.push(`${unit.id}: 叙事过短`);
+      if (unit.narrative.trim().length < 150) {
+        offenders.push(`${unit.id}: 仅 ${unit.narrative.trim().length} 字`);
       }
     }
     expect(offenders).toEqual([]);
