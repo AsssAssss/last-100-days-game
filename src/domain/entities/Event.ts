@@ -1,6 +1,15 @@
 import type { Inventory } from './Inventory';
 import type { ResourceDelta } from './Resources';
 
+/**
+ * 感染指令（经校验后的规范形态）。
+ * start：本回合玩家被咬/吸入孢子，开启倒计时；
+ * clear：奇迹般解除（如及时截肢）——代价由 resourceDelta 体现。
+ */
+export type InfectionCommand =
+  | { readonly action: 'start'; readonly cause: string; readonly turnsLeft: number }
+  | { readonly action: 'clear' };
+
 /** LLM 返回的回合事件结构（已经过 schema 与领域规则校验）。 */
 export interface TurnEvent {
   /** 本回合叙事文本。 */
@@ -21,4 +30,6 @@ export interface TurnEvent {
   readonly gameOverReason?: string;
   /** 本回合是否消耗了完整的一天（由 LLM 根据叙事决定）。 */
   readonly dayPassed: boolean;
+  /** 感染状态变更；undefined = 本回合感染状态无操作（倒计时仍由引擎自动递减）。 */
+  readonly infection?: InfectionCommand;
 }

@@ -57,6 +57,25 @@ export const GAME_TURN_TOOL = {
             type: 'boolean',
             description: '本回合是否结束了完整的一天（玩家入睡、熬过黑夜、或长时间转移等"足以让时间从今天跨到明天"的叙事）。默认 false——大多数回合是"同一天内的多个事件之一"。每天应有 3-7 个回合后才出现 dayPassed=true。',
           },
+          infection: {
+            type: 'object',
+            description: '感染状态变更。玩家本回合被感染者咬伤/吸入孢子时 action=start；截肢等极端手段成功解除时 action=clear；其余情况省略此字段或 action=none。倒计时由引擎自动每回合递减，你不需要也不允许管理它。',
+            properties: {
+              action: { type: 'string', enum: ['none', 'start', 'clear'] },
+              cause: {
+                type: 'string',
+                description: 'action=start 时必填：感染原因（"被奔跑者咬伤左臂"、"在地下车库吸入孢子"）。',
+              },
+              turnsUntilDeath: {
+                type: 'integer',
+                minimum: 3,
+                maximum: 12,
+                description: 'action=start 时的发作倒计时（回合数）。咬伤建议 6-10；大量吸入孢子建议 4-6。',
+              },
+            },
+            required: ['action'],
+            additionalProperties: false,
+          },
         },
         required: ['resources', 'inventoryAdd', 'inventoryRemove', 'memoryNote', 'isGameOver', 'dayPassed'],
         additionalProperties: false,
@@ -83,5 +102,10 @@ export type GameTurnInput = {
     isGameOver: boolean;
     gameOverReason?: string;
     dayPassed: boolean;
+    infection?: {
+      action: 'none' | 'start' | 'clear';
+      cause?: string;
+      turnsUntilDeath?: number;
+    };
   };
 };

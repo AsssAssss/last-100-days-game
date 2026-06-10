@@ -52,6 +52,47 @@ describe('buildTurnMessage', () => {
     expect(msg).toContain('遇见医生');
   });
 
+  it('omits infection line when not infected', () => {
+    const msg = buildTurnMessage(INITIAL_GAME_STATE, null);
+    expect(msg).not.toContain('已感染');
+  });
+
+  it('reports infection cause and remaining turns when infected', () => {
+    const msg = buildTurnMessage(
+      {
+        ...INITIAL_GAME_STATE,
+        infection: { cause: '在地铁站吸入孢子', turnsLeft: 4, turnsTotal: 8 },
+      },
+      '寻找药品'
+    );
+    expect(msg).toContain('玩家已感染');
+    expect(msg).toContain('在地铁站吸入孢子');
+    expect(msg).toContain('还剩 4 回合');
+  });
+
+  it('tells the LLM the amputation window is open right after infection', () => {
+    const msg = buildTurnMessage(
+      {
+        ...INITIAL_GAME_STATE,
+        infection: { cause: '被咬', turnsLeft: 8, turnsTotal: 8 },
+      },
+      '怎么办'
+    );
+    expect(msg).toContain('仍在截肢时间窗内');
+  });
+
+  it('tells the LLM the amputation window is closed once elapsed >= 2', () => {
+    const msg = buildTurnMessage(
+      {
+        ...INITIAL_GAME_STATE,
+        infection: { cause: '被咬', turnsLeft: 6, turnsTotal: 8 },
+      },
+      '怎么办'
+    );
+    expect(msg).toContain('截肢时间窗已关闭');
+    expect(msg).toContain('拒绝任何 clear');
+  });
+
   it('shows empty inventory note when inventory is empty', () => {
     const msg = buildTurnMessage({ ...INITIAL_GAME_STATE, inventory: [] }, null);
     expect(msg).toContain('库存：空');

@@ -1,4 +1,4 @@
-import type { TurnEvent } from '../entities/Event';
+import type { InfectionCommand, TurnEvent } from '../entities/Event';
 import type { ResourceDelta } from '../entities/Resources';
 
 /**
@@ -22,6 +22,11 @@ export interface RawTurnPatch {
     readonly isGameOver: boolean;
     readonly gameOverReason?: string;
     readonly dayPassed: boolean;
+    readonly infection?: {
+      readonly action: 'none' | 'start' | 'clear';
+      readonly cause?: string;
+      readonly turnsUntilDeath?: number;
+    };
   };
 }
 
@@ -39,6 +44,11 @@ const HP_GAIN_CAP = 10;
 const SANITY_GAIN_CAP = 10;
 const RESOURCE_GAIN_CAP = 30;
 const AMMO_GAIN_CAP = 20;
+
+const INFECTION_TURNS_MIN = 3;
+const INFECTION_TURNS_MAX = 12;
+const INFECTION_TURNS_DEFAULT = 8;
+const INFECTION_DEFAULT_CAUSE = '感染';
 
 /**
  * 强信号——叙事里出现这些表达就意味着至少跨过了一天的边界。
@@ -133,6 +143,26 @@ export function validateAndClamp(raw: RawTurnPatch): ValidationResult {
     dayPassed = true;
   }
 
+  let infection: InfectionCommand | undefined;
+  const rawInfection = raw.statePatch.infection;
+  if (rawInfection && rawInfection.action === 'start') {
+    let turns = rawInfection.turnsUntilDeath ?? INFECTION_TURNS_DEFAULT;
+    if (turns < INFECTION_TURNS_MIN || turns > INFECTION_TURNS_MAX) {
+      issues.push({
+        field: 'statePatch.infection.turnsUntilDeath',
+        message: `turnsUntilDeath ${turns} clamped to [${INFECTION_TURNS_MIN}, ${INFECTION_TURNS_MAX}]`,
+      });
+      turns = Math.max(INFECTION_TURNS_MIN, Math.min(INFECTION_TURNS_MAX, turns));
+    }
+    infection = {
+      action: 'start',
+      cause: rawInfection.cause?.trim() || INFECTION_DEFAULT_CAUSE,
+      turnsLeft: turns,
+    };
+  } else if (rawInfection && rawInfection.action === 'clear') {
+    infection = { action: 'clear' };
+  }
+
   const event: TurnEvent = {
     narrative: raw.narrative,
     choices: raw.choices,
@@ -143,6 +173,7 @@ export function validateAndClamp(raw: RawTurnPatch): ValidationResult {
     isGameOver: raw.statePatch.isGameOver,
     gameOverReason: raw.statePatch.gameOverReason,
     dayPassed,
+    infection,
   };
 
   return { event, issues };

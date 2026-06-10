@@ -71,4 +71,26 @@ describe('StatusBar', () => {
     const row = screen.getByTestId('resource-food');
     expect(row.querySelector(`.${expectedClass}`)).toBeInTheDocument();
   });
+
+  describe('infection banner', () => {
+    it('is hidden when not infected', () => {
+      render(<StatusBar state={INITIAL_GAME_STATE} />);
+      expect(screen.queryByTestId('infection-banner')).not.toBeInTheDocument();
+    });
+
+    it('shows cause and countdown when infected', () => {
+      render(
+        <StatusBar
+          state={{
+            ...INITIAL_GAME_STATE,
+            infection: { cause: '被奔跑者咬伤左臂', turnsLeft: 5, turnsTotal: 8 },
+          }}
+        />
+      );
+      const banner = screen.getByTestId('infection-banner');
+      expect(banner).toHaveTextContent('已感染');
+      expect(banner).toHaveTextContent('被奔跑者咬伤左臂');
+      expect(banner).toHaveTextContent('约 5 回合');
+    });
+  });
 });

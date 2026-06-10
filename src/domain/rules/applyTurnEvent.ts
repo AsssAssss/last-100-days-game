@@ -1,8 +1,10 @@
 import type { TurnEvent } from '../entities/Event';
 import {
+  AMPUTATION_WINDOW_TURNS,
   TOTAL_DAYS,
   hasReachedFinalDay,
   type GameState,
+  type InfectionState,
 } from '../entities/GameState';
 import { addItems, removeItems } from '../entities/Inventory';
 import { applyDelta, deathCause, isDead } from '../entities/Resources';
@@ -25,14 +27,50 @@ export interface ApplyTurnOptions {
   readonly advanceDay?: boolean;
 }
 
+function tick(infection: InfectionState): InfectionState {
+  return { ...infection, turnsLeft: infection.turnsLeft - 1 };
+}
+
+/**
+ * 推进感染状态机一回合：
+ * - clear → 仅在截肢时间窗内（感染后前 AMPUTATION_WINDOW_TURNS 回合）解除感染；
+ *   窗口已过则忽略指令、倒计时照常 -1（菌丝已入血，prompt 同步告知 LLM）
+ * - start → 开启倒计时；已感染时忽略新参数（防 LLM 重置），但时间照常流逝 -1
+ * - 无指令且已感染 → 倒计时 -1
+ */
+function nextInfection(
+  current: InfectionState | null,
+  event: TurnEvent
+): InfectionState | null {
+  if (event.infection?.action === 'clear') {
+    if (!current) return null;
+    const elapsed = current.turnsTotal - current.turnsLeft;
+    if (elapsed < AMPUTATION_WINDOW_TURNS) return null;
+    return tick(current);
+  }
+  if (event.infection?.action === 'start') {
+    if (current) return tick(current);
+    return {
+      cause: event.infection.cause,
+      turnsLeft: event.infection.turnsLeft,
+      turnsTotal: event.infection.turnsLeft,
+    };
+  }
+  if (current) {
+    return tick(current);
+  }
+  return null;
+}
+
 /**
  * 给定当前游戏状态 + LLM 返回的回合事件，计算下一状态。
  * 这是纯函数，不调任何外部依赖。
  *
- * 规则：
- * - 资源、库存、记忆按事件描述更新
+ * 规则（按优先级）：
+ * - 资源、库存、记忆、感染状态按事件描述更新
  * - 若事件本身标记 isGameOver，则按事件给出的原因结束
  * - 否则若资源耗尽（HP/精神/食物/水任一为 0），按死因结束
+ * - 否则若感染倒计时归零，菌变发作死亡
  * - 否则若当前天数已达 TOTAL_DAYS，正常通关
  * - 否则按 options.advanceDay（若提供）或 event.dayPassed 决定是否推进一天
  */
@@ -49,6 +87,7 @@ export function applyTurnEvent(
     day: state.day,
     note: event.memoryNote,
   });
+  const infection = nextInfection(state.infection ?? null, event);
 
   if (event.isGameOver) {
     return {
@@ -56,6 +95,7 @@ export function applyTurnEvent(
       resources,
       inventory,
       memory,
+      infection,
       lastNarrative: event.narrative,
       choices: [],
       isGameOver: true,
@@ -71,6 +111,7 @@ export function applyTurnEvent(
       resources,
       inventory,
       memory,
+      infection,
       lastNarrative: event.narrative,
       choices: [],
       isGameOver: true,
@@ -78,16 +119,35 @@ export function applyTurnEvent(
     };
   }
 
-  if (hasReachedFinalDay({ ...state, day: state.day })) {
+  if (infection && infection.turnsLeft <= 0) {
     return {
       ...state,
       resources,
       inventory,
       memory,
+      infection,
       lastNarrative: event.narrative,
       choices: [],
       isGameOver: true,
-      gameOverReason: `成功活到第 ${TOTAL_DAYS} 天`,
+      gameOverReason: '菌变发作',
+    };
+  }
+
+  if (hasReachedFinalDay({ ...state, day: state.day })) {
+    // 带菌撑到第 100 天也算通关——但结局文案如实记录这份苦涩
+    const victoryReason = infection
+      ? `成功活到第 ${TOTAL_DAYS} 天——但菌丝仍在你体内蔓延`
+      : `成功活到第 ${TOTAL_DAYS} 天`;
+    return {
+      ...state,
+      resources,
+      inventory,
+      memory,
+      infection,
+      lastNarrative: event.narrative,
+      choices: [],
+      isGameOver: true,
+      gameOverReason: victoryReason,
     };
   }
 
@@ -97,9 +157,9 @@ export function applyTurnEvent(
     resources,
     inventory,
     memory,
+    infection,
     lastNarrative: event.narrative,
     choices: event.choices,
     isGameOver: false,
   };
 }
-

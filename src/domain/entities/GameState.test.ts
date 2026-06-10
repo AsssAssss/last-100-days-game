@@ -28,6 +28,10 @@ describe('GameState', () => {
       expect(INITIAL_GAME_STATE.memory.recent).toEqual([]);
       expect(INITIAL_GAME_STATE.memory.summaries).toEqual([]);
     });
+
+    it('starts uninfected', () => {
+      expect(INITIAL_GAME_STATE.infection).toBeNull();
+    });
   });
 
   describe('hasReachedFinalDay', () => {

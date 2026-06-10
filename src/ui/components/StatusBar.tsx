@@ -23,6 +23,21 @@ export function StatusBar({ state }: StatusBarProps) {
         DAY {state.day} <span className="text-neutral-600">/ 100</span>
       </div>
 
+      {state.infection && (
+        <div
+          data-testid="infection-banner"
+          className="border border-red-900 bg-red-950/40 rounded p-2"
+        >
+          <div className="text-red-400 text-xs font-bold tracking-wider animate-pulse">
+            ⚠ 已感染
+          </div>
+          <div className="text-red-300/80 text-xs mt-1">{state.infection.cause}</div>
+          <div className="text-red-300/80 text-xs">
+            发作倒计时：约 {state.infection.turnsLeft} 回合
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col gap-2">
         {(Object.keys(RESOURCE_LABELS) as Array<keyof typeof RESOURCE_LABELS>).map((key) => {
           const value = state.resources[key as keyof typeof state.resources];

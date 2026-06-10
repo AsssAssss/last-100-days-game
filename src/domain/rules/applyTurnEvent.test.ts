@@ -125,4 +125,141 @@ describe('applyTurnEvent', () => {
     const next = applyTurnEvent(lastDayState, event({ resourceDelta: { hp: -100 } }));
     expect(next.gameOverReason).toBe('伤重不治');
   });
+
+  describe('infection lifecycle', () => {
+    /** 已感染多回合：elapsed = 8 - 3 = 5，截肢窗口早已关闭。 */
+    const INFECTED = {
+      ...INITIAL_GAME_STATE,
+      infection: { cause: '被咬', turnsLeft: 3, turnsTotal: 8 },
+    };
+    /** 刚被咬（还没 tick 过）：elapsed = 0，截肢窗口开着。 */
+    const FRESHLY_BITTEN = {
+      ...INITIAL_GAME_STATE,
+      infection: { cause: '被咬', turnsLeft: 8, turnsTotal: 8 },
+    };
+
+    it('starts infection when event commands start', () => {
+      const next = applyTurnEvent(
+        INITIAL_GAME_STATE,
+        event({ infection: { action: 'start', cause: '被奔跑者咬伤左臂', turnsLeft: 8 } })
+      );
+      expect(next.infection).toEqual({
+        cause: '被奔跑者咬伤左臂',
+        turnsLeft: 8,
+        turnsTotal: 8,
+      });
+      expect(next.isGameOver).toBe(false);
+    });
+
+    it('does not tick the countdown on the turn infection starts', () => {
+      const next = applyTurnEvent(
+        INITIAL_GAME_STATE,
+        event({ infection: { action: 'start', cause: 'x', turnsLeft: 5 } })
+      );
+      expect(next.infection?.turnsLeft).toBe(5);
+    });
+
+    it('ticks countdown down by 1 each turn without commands', () => {
+      const next = applyTurnEvent(INFECTED, event());
+      expect(next.infection?.turnsLeft).toBe(2);
+      expect(next.isGameOver).toBe(false);
+    });
+
+    it('kills the player when countdown reaches zero', () => {
+      const oneLeft = {
+        ...INITIAL_GAME_STATE,
+        infection: { cause: '被咬', turnsLeft: 1, turnsTotal: 8 },
+      };
+      const next = applyTurnEvent(oneLeft, event());
+      expect(next.isGameOver).toBe(true);
+      expect(next.gameOverReason).toBe('菌变发作');
+      expect(next.choices).toEqual([]);
+    });
+
+    it('clear removes infection within the amputation window (elapsed 0)', () => {
+      const next = applyTurnEvent(FRESHLY_BITTEN, event({ infection: { action: 'clear' } }));
+      expect(next.infection).toBeNull();
+      expect(next.isGameOver).toBe(false);
+    });
+
+    it('clear removes infection at the edge of the window (elapsed 1)', () => {
+      const oneTickIn = {
+        ...INITIAL_GAME_STATE,
+        infection: { cause: '被咬', turnsLeft: 7, turnsTotal: 8 },
+      };
+      const next = applyTurnEvent(oneTickIn, event({ infection: { action: 'clear' } }));
+      expect(next.infection).toBeNull();
+    });
+
+    it('rejects clear after the window closes and keeps ticking (elapsed 2+)', () => {
+      const twoTicksIn = {
+        ...INITIAL_GAME_STATE,
+        infection: { cause: '被咬', turnsLeft: 6, turnsTotal: 8 },
+      };
+      const next = applyTurnEvent(twoTicksIn, event({ infection: { action: 'clear' } }));
+      expect(next.infection).toEqual({ cause: '被咬', turnsLeft: 5, turnsTotal: 8 });
+    });
+
+    it('clear when uninfected is a safe no-op', () => {
+      const next = applyTurnEvent(INITIAL_GAME_STATE, event({ infection: { action: 'clear' } }));
+      expect(next.infection).toBeNull();
+      expect(next.isGameOver).toBe(false);
+    });
+
+    it('ignores a second start while already infected but time still passes', () => {
+      const next = applyTurnEvent(
+        INFECTED,
+        event({ infection: { action: 'start', cause: '再次被咬', turnsLeft: 10 } })
+      );
+      // 不重置倒计时/原因，但该回合的 -1 tick 照常发生
+      expect(next.infection).toEqual({ cause: '被咬', turnsLeft: 2, turnsTotal: 8 });
+    });
+
+    it('treats legacy saves without infection field as uninfected', () => {
+      const legacy = { ...INITIAL_GAME_STATE } as Record<string, unknown>;
+      delete legacy.infection;
+      const next = applyTurnEvent(legacy as unknown as typeof INITIAL_GAME_STATE, event());
+      expect(next.infection).toBeNull();
+      expect(next.isGameOver).toBe(false);
+    });
+
+    it('resource death takes precedence over infection death', () => {
+      const oneLeft = {
+        ...INITIAL_GAME_STATE,
+        infection: { cause: 'x', turnsLeft: 1, turnsTotal: 8 },
+      };
+      const next = applyTurnEvent(oneLeft, event({ resourceDelta: { hp: -200 } }));
+      expect(next.gameOverReason).toBe('伤重不治');
+    });
+
+    it('infection death takes precedence over final-day victory', () => {
+      const dying = {
+        ...INITIAL_GAME_STATE,
+        day: TOTAL_DAYS,
+        infection: { cause: 'x', turnsLeft: 1, turnsTotal: 8 },
+      };
+      const next = applyTurnEvent(dying, event());
+      expect(next.gameOverReason).toBe('菌变发作');
+    });
+
+    it('surviving to the final day while still infected is a bittersweet victory', () => {
+      const infectedAtEnd = {
+        ...INITIAL_GAME_STATE,
+        day: TOTAL_DAYS,
+        infection: { cause: '被咬', turnsLeft: 5, turnsTotal: 8 },
+      };
+      const next = applyTurnEvent(infectedAtEnd, event());
+      expect(next.isGameOver).toBe(true);
+      expect(next.gameOverReason).toBe(`成功活到第 ${TOTAL_DAYS} 天——但菌丝仍在你体内蔓延`);
+    });
+
+    it('event isGameOver still records the ticked infection state', () => {
+      const next = applyTurnEvent(
+        INFECTED,
+        event({ isGameOver: true, gameOverReason: '被循声者撕碎' })
+      );
+      expect(next.gameOverReason).toBe('被循声者撕碎');
+      expect(next.infection?.turnsLeft).toBe(2);
+    });
+  });
 });

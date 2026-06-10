@@ -119,6 +119,67 @@ describe('PatchValidation', () => {
     });
   });
 
+  describe('infection command validation', () => {
+    it('leaves infection undefined when field is absent', () => {
+      const { event } = validateAndClamp(basePatch());
+      expect(event.infection).toBeUndefined();
+    });
+
+    it('treats action=none as no command', () => {
+      const { event } = validateAndClamp(basePatch({ infection: { action: 'none' } }));
+      expect(event.infection).toBeUndefined();
+    });
+
+    it('normalizes a valid start command', () => {
+      const { event, issues } = validateAndClamp(
+        basePatch({ infection: { action: 'start', cause: '被咬', turnsUntilDeath: 8 } })
+      );
+      expect(event.infection).toEqual({ action: 'start', cause: '被咬', turnsLeft: 8 });
+      expect(issues).toHaveLength(0);
+    });
+
+    it('defaults turnsUntilDeath to 8 when omitted', () => {
+      const { event } = validateAndClamp(
+        basePatch({ infection: { action: 'start', cause: '孢子' } })
+      );
+      expect(event.infection).toEqual({ action: 'start', cause: '孢子', turnsLeft: 8 });
+    });
+
+    it.each([
+      [1, 3],
+      [99, 12],
+    ])('clamps turnsUntilDeath %i to %i and records issue', (input, expected) => {
+      const { event, issues } = validateAndClamp(
+        basePatch({ infection: { action: 'start', cause: 'x', turnsUntilDeath: input } })
+      );
+      expect(event.infection).toEqual({ action: 'start', cause: 'x', turnsLeft: expected });
+      expect(issues.some((i) => i.field === 'statePatch.infection.turnsUntilDeath')).toBe(true);
+    });
+
+    it.each([3, 12])(
+      'passes boundary value %i through unchanged without issues',
+      (boundary) => {
+        const { event, issues } = validateAndClamp(
+          basePatch({ infection: { action: 'start', cause: 'x', turnsUntilDeath: boundary } })
+        );
+        expect(event.infection).toEqual({ action: 'start', cause: 'x', turnsLeft: boundary });
+        expect(issues.some((i) => i.field === 'statePatch.infection.turnsUntilDeath')).toBe(false);
+      }
+    );
+
+    it('falls back to default cause when cause is empty/whitespace', () => {
+      const { event } = validateAndClamp(
+        basePatch({ infection: { action: 'start', cause: '  ' } })
+      );
+      expect(event.infection).toEqual({ action: 'start', cause: '感染', turnsLeft: 8 });
+    });
+
+    it('passes through clear command', () => {
+      const { event } = validateAndClamp(basePatch({ infection: { action: 'clear' } }));
+      expect(event.infection).toEqual({ action: 'clear' });
+    });
+  });
+
   describe('narrativeImpliesDayPassed', () => {
     it('returns false for ordinary within-day narrative', () => {
       expect(narrativeImpliesDayPassed('你蹲在墙角不敢动。')).toBe(false);

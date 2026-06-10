@@ -1,4 +1,7 @@
-import type { GameState } from '../../../domain/entities/GameState';
+import {
+  AMPUTATION_WINDOW_TURNS,
+  type GameState,
+} from '../../../domain/entities/GameState';
 
 const RECENT_FOR_PROMPT = 3;
 
@@ -10,6 +13,17 @@ export function buildTurnMessage(state: GameState, playerInput: string | null): 
   lines.push(`- 玩家挑战进度：Day ${state.day} / 100（这是玩家的倒计时第 ${state.day} 天，**不是末日的绝对日期**；叙事里不要直接写出这个数字）`);
   lines.push(`- 资源 (0-100)：HP ${state.resources.hp} · 精神 ${state.resources.sanity} · 食物 ${state.resources.food} · 水 ${state.resources.water} · 弹药 ${state.resources.ammo}`);
   lines.push(`- 库存：${state.inventory.length === 0 ? '空' : state.inventory.join('、')}`);
+  if (state.infection) {
+    const elapsed = state.infection.turnsTotal - state.infection.turnsLeft;
+    const windowOpen = elapsed < AMPUTATION_WINDOW_TURNS;
+    lines.push(
+      `- ⚠️ **玩家已感染**（${state.infection.cause}），距离菌变发作还剩 ${state.infection.turnsLeft} 回合。叙事中必须体现恶化症状（剩余回合越少越剧烈）。倒计时由引擎管理，你不要在 statePatch 里再 start。${
+        windowOpen
+          ? '现在仍在截肢时间窗内——若伤在四肢且玩家选择立刻截肢，可用 infection.clear 解除（代价：HP -30~-50 + 永久残肢）。'
+          : '截肢时间窗已关闭（菌丝已入血）——引擎将拒绝任何 clear 指令，不要再给玩家虚假希望。'
+      }`
+    );
+  }
 
   if (state.memory.summaries.length > 0) {
     lines.push('');
